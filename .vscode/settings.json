@@ -1,0 +1,13 @@
+{
+	"files.associations": {
+		"string": "c",
+		"vector": "c",
+		"memory": "c",
+		"string_view": "c",
+		"system_error": "c",
+		"array": "c",
+		"initializer_list": "c",
+		"hash_table.h": "c",
+		"random": "c"
+	}
+}
