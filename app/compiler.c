@@ -3,27 +3,33 @@
 #include <ctype.h>
 #include <string.h>
 #include "compiler/hash_table.h"
+#include "compiler/abstract_syntax_tree.h"
 #include "compiler/token.h"
 #include "compiler/error.h"
-
-ht *symbol_table = NULL;
 
 struct file_data {
 	char* name;
 	int line_num;
-	int col_num;
-	int last_line_end;
-} file_data = {"", 1, 0, 0};
+} file_data = {"", 1};
+
+ht *symbol_table = NULL;
+ast *parse_tree_root = NULL;
+token *next_token = NULL;
+
+typedef struct {
+	int is_valid;
+} return_type;
 
 void init_symbol_table() {
 	symbol_table = ht_create();
-	size_t kw_len = sizeof(RSVD_WORDS) / sizeof(char*);
+	size_t rw_len = sizeof(RES_WORDS) / sizeof(char*);
 
-	for (size_t i = 0; i < kw_len; i++) {
-		token_t *kw_token = (token_t*)malloc(sizeof(token_t));
-		kw_token->type = RW_TOKEN_SUBTYPES[i];
-		strcpy(kw_token->lex_val.str_val, RSVD_WORDS[i]);
-		ht_set(symbol_table, RSVD_WORDS[i], kw_token);
+	for (size_t i = 0; i < rw_len; i++) {
+		token *rw_token = (token*)malloc(sizeof(token));
+		rw_token->type = RW_TOKEN_TYPES[i];
+		rw_token->subtype = RW_TOKEN_SUBTYPES[i];
+		strcpy(rw_token->lex_val.str_val, RES_WORDS[i]);
+		ht_set(symbol_table, RES_WORDS[i], rw_token);
 	}
 }
 
@@ -37,21 +43,16 @@ void destroy_symbol_table() {
 
 int get_char(FILE *file) {
 	int c = getc(file);
-	file_data.col_num++;
 	if (c == '\n') {
-		file_data.last_line_end = file_data.col_num;
 		file_data.line_num++;
-		file_data.col_num = 0;
 	}
 	return c;
 }
 
 int unget_char(int c, FILE *file) {
 	ungetc(c, file);
-	file_data.col_num--;
-	if (file_data.col_num == -1) {
+	if (c == '\n') {
 		file_data.line_num--;
-		file_data.col_num = file_data.last_line_end;
 	}
 	return c;
 }
@@ -67,7 +68,6 @@ void ignore_comments_whitespace(int *c_addr, FILE *file) {
 
 	if (*c_addr == '/') {
 		int comment_line_num = file_data.line_num;
-		int comment_col_num = file_data.col_num;
 		int next_c = get_char(file);
 
 		// Block
@@ -85,14 +85,14 @@ void ignore_comments_whitespace(int *c_addr, FILE *file) {
 				} while (*c_addr != '*' && *c_addr != EOF);
 
 				if (*c_addr == EOF) {
-					print_error(file_data.name, UNCLOSED_COMMENT, comment_line_num, comment_col_num, "");
+					print_error(file_data.name, UNCLOSED_COMMENT, comment_line_num, "");
 					break;
 				}
 
 				next_c = get_char(file);
 				if (next_c == EOF) {
 					*c_addr = next_c;
-					print_error(file_data.name, UNCLOSED_COMMENT, comment_line_num, comment_col_num, "");
+					print_error(file_data.name, UNCLOSED_COMMENT, comment_line_num, "");
 					break;
 				}
 				if (next_c == '/') {
@@ -122,13 +122,15 @@ void ignore_comments_whitespace(int *c_addr, FILE *file) {
 	}
 }
 
-token_t *scan(FILE *file) {
+token *scan(FILE *file) {
 	int c;
 
 	ignore_comments_whitespace(&c, file);
 
-	token_t *token = (token_t*)malloc(sizeof(token_t));
-	*token = (token_t){T_UNKNOWN, 0};
+	token *tok = (token*)malloc(sizeof(token));
+	tok->type = T_UNKNOWN;
+	tok->subtype = T_ST_NONE;
+	tok->tag = T_TAG_NONE;
 
 	switch (c) {
 	case T_PERIOD:
@@ -138,35 +140,55 @@ token_t *scan(FILE *file) {
 	case T_COMMA:
 	case T_LBRACK:
 	case T_RBRACK:
-	case T_AND:
-	case T_OR:
-	case T_PLUS:
-	case T_MINUS:
-	case T_MULT:
-	case T_DIVIDE:
-		token->type = c;
+		tok->type = c;
+		break;
+	case '&':
+		tok->type = T_EXPR_OP;
+		tok->subtype = T_ST_AND; 
+		break;
+	case '|':
+		tok->type = T_EXPR_OP;
+		tok->subtype = T_ST_OR;
+		break;
+	case '+':
+		tok->type = T_ARITH_OP;
+		tok->subtype = T_ST_PLUS; 
+		break;
+	case '-':
+		tok->type = T_ARITH_OP;
+		tok->subtype = T_ST_MINUS;
+		break;
+	case '*':
+		tok->type = T_TERM_OP;
+		tok->subtype = T_ST_MULT;
+		break;
+	case '/':
+		tok->type = T_TERM_OP;
+		tok->subtype = T_ST_DIVIDE;
 		break;
 	case '<':
 		{
+			tok->type = T_REL_OP;
 			char next_c = get_char(file);
 			if (next_c == '=') {
-				token->type = T_LTEQL;
+				tok->subtype = T_ST_LTEQL;
 			}
 			else {
 				unget_char(next_c, file);
-				token->type = T_LTHAN;
+				tok->subtype = T_ST_LTHAN;
 			}
 		}
 		break;
 	case '>':
 		{
+			tok->type = T_REL_OP;
 			char next_c = get_char(file);
 			if (next_c == '=') {
-				token->type = T_GTEQL;
+				tok->subtype = T_ST_GTEQL;
 			}
 			else {
 				unget_char(next_c, file);
-				token->type = T_GTHAN;
+				tok->subtype = T_ST_GTHAN;
 			}
 		}
 		break;
@@ -174,7 +196,8 @@ token_t *scan(FILE *file) {
 		{
 			char next_c = get_char(file);
 			if (next_c == '=') {
-				token->type = T_EQLTO;
+				tok->type = T_REL_OP;
+				tok->subtype = T_ST_EQLTO;
 			}
 			else {
 				// illegal, ignore
@@ -186,7 +209,8 @@ token_t *scan(FILE *file) {
 		{
 			char next_c = get_char(file);
 			if (next_c == '=') {
-				token->type = T_NOTEQ;
+				tok->type = T_REL_OP;
+				tok->subtype = T_ST_NOTEQ;
 			}
 			else {
 				// illegal, ignore
@@ -198,118 +222,143 @@ token_t *scan(FILE *file) {
 		{
 			char next_c = get_char(file);
 			if (next_c == '=') {
-				token->type = T_ASSMT;
+				tok->type = T_ASSMT;
 			}
 			else {
 				unget_char(next_c, file);
-				token->type = T_COLON;
+				tok->type = T_COLON;
 			}
 		}
 		break;
 	case '\"':
 		{
-			token->type = T_STR_LIT;
+			tok->type = T_STR_LIT;
+			tok->tag = T_TAG_STR;
 			int str_line_num = file_data.line_num;
-			int str_col_num = file_data.col_num;
 			size_t i = 0;
 			c = get_char(file);
 			while (c != '\"' && c != EOF) {
-				token->lex_val.str_val[i] = c;
+				tok->lex_val.str_val[i] = c;
 				c = get_char(file);
 				i++;
 			}
-			token->lex_val.str_val[i] = '\0';
+			tok->lex_val.str_val[i] = '\0';
 
 			if (c == EOF)
-				print_error(file_data.name, UNCLOSED_STR, str_line_num, str_col_num, "");
+				print_error(file_data.name, UNCLOSED_STR, str_line_num, "");
 		}
 		break;
 	case 'A'...'Z':
 	case 'a'...'z':
 		{
-			token->type = T_IDENT;
+			tok->type = T_IDENT;
 			size_t i = 0;
 			do {
-				token->lex_val.str_val[i] = toupper(c);
+				tok->lex_val.str_val[i] = toupper(c);
 				c = get_char(file);
 				i++;
 			} while (isalnum(c) || c == '_');
 			unget_char(c, file);
-			token->lex_val.str_val[i] = '\0';
+			tok->lex_val.str_val[i] = '\0';
 			
-			token_t *existing_token = ht_get(symbol_table, token->lex_val.str_val);
+			token *existing_token = ht_get(symbol_table, tok->lex_val.str_val);
 			if (existing_token == NULL) {
-				ht_set(symbol_table, token->lex_val.str_val, token);
+				ht_set(symbol_table, tok->lex_val.str_val, tok);
 			} else {
-				free(token);
-				token = existing_token;
+				free(tok);
+				tok = existing_token;
 			}
 		}
 		break;
 	case '0'...'9':
 		{
+			tok->type = T_NUM_LIT;
+			
 			int num_line_num = file_data.line_num;
-			int num_col_num = file_data.col_num;
 			int dec_pt_cnt = 0;
 			size_t i = 0;
 			do {
-				token->lex_val.str_val[i] = toupper(c);
+				tok->lex_val.str_val[i] = toupper(c);
 				c = get_char(file);
 				i++;
 				if (c == '.') dec_pt_cnt++;
 			} while (isdigit(c) || c == '.');
 			unget_char(c, file);
-			token->lex_val.str_val[i] = '\0';
+			tok->lex_val.str_val[i] = '\0';
 
 			if (dec_pt_cnt > 1) {
-				print_error(file_data.name, EXTRA_DEC_PT, num_line_num, num_col_num, "");
-				token->type = T_FLOAT_LIT;
+				print_error(file_data.name, EXTRA_DEC_PT, num_line_num, "");
+				tok->type = T_UNKNOWN;
 			}
 			else if (dec_pt_cnt == 1) {
-				token->type = T_FLOAT_LIT;
-				token->lex_val.flt_val = atof(token->lex_val.str_val);
+				tok->subtype = T_ST_FLOAT_LIT;
+				tok->tag = T_TAG_FLT;
+				tok->lex_val.flt_val = atof(tok->lex_val.str_val);
 			}
 			else {
-				token->type = T_INT_LIT;
-				token->lex_val.int_val = atoi(token->lex_val.str_val);
+				tok->subtype = T_ST_INT_LIT;
+				tok->tag = T_TAG_INT;
+				tok->lex_val.int_val = atoi(tok->lex_val.str_val);
 			}
 		}
 		break;
 	case EOF:
-		token->type = T_EOF;
+		tok->type = T_EOF;
 		break;
 	default:
-		print_error(file_data.name, ILLEGAL_CHAR, file_data.line_num, file_data.col_num, (char[2]){(char)c, '\0'});
+		print_error(file_data.name, UNREC_TOKEN, file_data.line_num, (char[2]){(char)c, '\0'});
 		break;
 	}
 
-	return token;
+	return tok;
 }
+/*
+return_type factor(FILE *file) {
+	next_token = scan(file);
+	if (next_token->type == '(') {
+		return_type ret = factor(file);
+		if (!ret.is_valid) {
+			return ret;
+		}
+		next_token = scan(file);
+		if (next_token->type == ')') {
+			return (return_type){1};
+		}
+		return (return_type){2};
+	}
+	if (next_token->type == '-') {
+		next_token = scan(file);
+		if (next_token->type == T_IDENT) {
+			return (return_type){1};
+		}
+		if (next_token->type == T_NUM_LIT) {
+			return (return_type){1};
+		}
+		return (return_type){2};
+	}
+	if (next_token->type == )
+}
+
+return_type parse(FILE *file) {
+	return factor(file);
+}
+*/
 
 int compile(FILE *file) {
 	
 	init_symbol_table();
+	parse_tree_root = ast_create();
 
-	int t_type;
-	do {
-		token_t *token = scan(file);
-		t_type = token->type;
-		printf("%d\n", t_type);
-		if (ht_get(symbol_table, token->lex_val.str_val) == NULL) {
-			// free all tokens not in the symbol table
-			free(token);
-		}
-	} while (t_type != T_EOF);
+	// return_type output = parse(file);
 
-	hti iter = ht_iterator(symbol_table);
-	while(ht_next(&iter)) {
-		printf("%s: %p\n", iter.key, iter.value);
-	}
+	while (scan(file)->type != T_EOF) {}
 
 	destroy_symbol_table();
-	return 0;
-}
+	//ast_destroy(root);
 
+	return 0;
+	//return output.is_valid;
+}
 
 int main(int argc, char *argv[]) {
     
@@ -327,8 +376,6 @@ int main(int argc, char *argv[]) {
     }
 
     compile(input_file);
-
     fclose(input_file);
-    
     exit(0);
 }
