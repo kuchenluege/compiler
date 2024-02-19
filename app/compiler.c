@@ -7,6 +7,8 @@
 #include "compiler/token.h"
 #include "compiler/error.h"
 
+#define ASSERT(X) if (!(X)) return 0;
+
 struct file_data {
 	char* name;
 	int line_num;
@@ -14,11 +16,8 @@ struct file_data {
 
 ht *symbol_table = NULL;
 ast *parse_tree_root = NULL;
-token *next_token = NULL;
-
-typedef struct {
-	int is_valid;
-} return_type;
+token *tok = NULL;
+token *unscanned_tok = NULL;
 
 void init_symbol_table() {
 	symbol_table = ht_create();
@@ -49,12 +48,11 @@ int get_char(FILE *file) {
 	return c;
 }
 
-int unget_char(int c, FILE *file) {
+void unget_char(int c, FILE *file) {
 	ungetc(c, file);
 	if (c == '\n') {
 		file_data.line_num--;
 	}
-	return c;
 }
 
 void ignore_whitespace(int *c_addr, FILE *file) {
@@ -122,15 +120,26 @@ void ignore_comments_whitespace(int *c_addr, FILE *file) {
 	}
 }
 
-token *scan(FILE *file) {
-	int c;
+void unscan(token *t) {
+	printf("(Unscanned token: %d)\n", t->type);
+	unscanned_tok = t;
+}
 
+token *scan(FILE *file) {
+	if (unscanned_tok) {
+		printf("(Rescanned token: %d)\n", unscanned_tok->type);
+		token *tmp = unscanned_tok;
+		unscanned_tok = NULL;
+		return tmp;
+	}
+	
+	int c;
 	ignore_comments_whitespace(&c, file);
 
-	token *tok = (token*)malloc(sizeof(token));
-	tok->type = T_UNKNOWN;
-	tok->subtype = T_ST_NONE;
-	tok->tag = T_TAG_NONE;
+	token *t = (token*)malloc(sizeof(token));
+	t->type = T_UNKNOWN;
+	t->subtype = T_ST_NONE;
+	t->tag = T_TAG_NONE;
 
 	switch (c) {
 	case T_PERIOD:
@@ -140,55 +149,55 @@ token *scan(FILE *file) {
 	case T_COMMA:
 	case T_LBRACK:
 	case T_RBRACK:
-		tok->type = c;
+		t->type = c;
 		break;
 	case '&':
-		tok->type = T_EXPR_OP;
-		tok->subtype = T_ST_AND; 
+		t->type = T_EXPR_OP;
+		t->subtype = T_ST_AND; 
 		break;
 	case '|':
-		tok->type = T_EXPR_OP;
-		tok->subtype = T_ST_OR;
+		t->type = T_EXPR_OP;
+		t->subtype = T_ST_OR;
 		break;
 	case '+':
-		tok->type = T_ARITH_OP;
-		tok->subtype = T_ST_PLUS; 
+		t->type = T_ARITH_OP;
+		t->subtype = T_ST_PLUS; 
 		break;
 	case '-':
-		tok->type = T_ARITH_OP;
-		tok->subtype = T_ST_MINUS;
+		t->type = T_ARITH_OP;
+		t->subtype = T_ST_MINUS;
 		break;
 	case '*':
-		tok->type = T_TERM_OP;
-		tok->subtype = T_ST_MULT;
+		t->type = T_TERM_OP;
+		t->subtype = T_ST_MULT;
 		break;
 	case '/':
-		tok->type = T_TERM_OP;
-		tok->subtype = T_ST_DIVIDE;
+		t->type = T_TERM_OP;
+		t->subtype = T_ST_DIVIDE;
 		break;
 	case '<':
 		{
-			tok->type = T_REL_OP;
+			t->type = T_REL_OP;
 			char next_c = get_char(file);
 			if (next_c == '=') {
-				tok->subtype = T_ST_LTEQL;
+				t->subtype = T_ST_LTEQL;
 			}
 			else {
 				unget_char(next_c, file);
-				tok->subtype = T_ST_LTHAN;
+				t->subtype = T_ST_LTHAN;
 			}
 		}
 		break;
 	case '>':
 		{
-			tok->type = T_REL_OP;
+			t->type = T_REL_OP;
 			char next_c = get_char(file);
 			if (next_c == '=') {
-				tok->subtype = T_ST_GTEQL;
+				t->subtype = T_ST_GTEQL;
 			}
 			else {
 				unget_char(next_c, file);
-				tok->subtype = T_ST_GTHAN;
+				t->subtype = T_ST_GTHAN;
 			}
 		}
 		break;
@@ -196,8 +205,8 @@ token *scan(FILE *file) {
 		{
 			char next_c = get_char(file);
 			if (next_c == '=') {
-				tok->type = T_REL_OP;
-				tok->subtype = T_ST_EQLTO;
+				t->type = T_REL_OP;
+				t->subtype = T_ST_EQLTO;
 			}
 			else {
 				// illegal, ignore
@@ -209,8 +218,8 @@ token *scan(FILE *file) {
 		{
 			char next_c = get_char(file);
 			if (next_c == '=') {
-				tok->type = T_REL_OP;
-				tok->subtype = T_ST_NOTEQ;
+				t->type = T_REL_OP;
+				t->subtype = T_ST_NOTEQ;
 			}
 			else {
 				// illegal, ignore
@@ -222,27 +231,27 @@ token *scan(FILE *file) {
 		{
 			char next_c = get_char(file);
 			if (next_c == '=') {
-				tok->type = T_ASSMT;
+				t->type = T_ASSMT;
 			}
 			else {
 				unget_char(next_c, file);
-				tok->type = T_COLON;
+				t->type = T_COLON;
 			}
 		}
 		break;
 	case '\"':
 		{
-			tok->type = T_STR_LIT;
-			tok->tag = T_TAG_STR;
+			t->type = T_STR_LIT;
+			t->tag = T_TAG_STR;
 			int str_line_num = file_data.line_num;
 			size_t i = 0;
 			c = get_char(file);
 			while (c != '\"' && c != EOF) {
-				tok->lex_val.str_val[i] = c;
+				t->lex_val.str_val[i] = c;
 				c = get_char(file);
 				i++;
 			}
-			tok->lex_val.str_val[i] = '\0';
+			t->lex_val.str_val[i] = '\0';
 
 			if (c == EOF)
 				print_error(file_data.name, UNCLOSED_STR, str_line_num, "");
@@ -251,113 +260,464 @@ token *scan(FILE *file) {
 	case 'A'...'Z':
 	case 'a'...'z':
 		{
-			tok->type = T_IDENT;
+			t->type = T_IDENT;
 			size_t i = 0;
 			do {
-				tok->lex_val.str_val[i] = toupper(c);
+				t->lex_val.str_val[i] = toupper(c);
 				c = get_char(file);
 				i++;
 			} while (isalnum(c) || c == '_');
 			unget_char(c, file);
-			tok->lex_val.str_val[i] = '\0';
+			t->lex_val.str_val[i] = '\0';
 			
-			token *existing_token = ht_get(symbol_table, tok->lex_val.str_val);
+			token *existing_token = ht_get(symbol_table, t->lex_val.str_val);
 			if (existing_token == NULL) {
-				ht_set(symbol_table, tok->lex_val.str_val, tok);
+				ht_set(symbol_table, t->lex_val.str_val, t);
 			} else {
-				free(tok);
-				tok = existing_token;
+				free(t);
+				t = existing_token;
 			}
 		}
 		break;
 	case '0'...'9':
 		{
-			tok->type = T_NUM_LIT;
+			t->type = T_NUM_LIT;
 			
 			int num_line_num = file_data.line_num;
 			int dec_pt_cnt = 0;
 			size_t i = 0;
 			do {
-				tok->lex_val.str_val[i] = toupper(c);
+				t->lex_val.str_val[i] = toupper(c);
 				c = get_char(file);
 				i++;
 				if (c == '.') dec_pt_cnt++;
 			} while (isdigit(c) || c == '.');
 			unget_char(c, file);
-			tok->lex_val.str_val[i] = '\0';
+			t->lex_val.str_val[i] = '\0';
 
 			if (dec_pt_cnt > 1) {
 				print_error(file_data.name, EXTRA_DEC_PT, num_line_num, "");
-				tok->type = T_UNKNOWN;
+				t->type = T_UNKNOWN;
 			}
 			else if (dec_pt_cnt == 1) {
-				tok->subtype = T_ST_FLOAT_LIT;
-				tok->tag = T_TAG_FLT;
-				tok->lex_val.flt_val = atof(tok->lex_val.str_val);
+				t->subtype = T_ST_FLOAT_LIT;
+				t->tag = T_TAG_FLT;
+				t->lex_val.flt_val = atof(t->lex_val.str_val);
 			}
 			else {
-				tok->subtype = T_ST_INT_LIT;
-				tok->tag = T_TAG_INT;
-				tok->lex_val.int_val = atoi(tok->lex_val.str_val);
+				t->subtype = T_ST_INT_LIT;
+				t->tag = T_TAG_INT;
+				t->lex_val.int_val = atoi(t->lex_val.str_val);
 			}
 		}
 		break;
 	case EOF:
-		tok->type = T_EOF;
+		t->type = T_EOF;
 		break;
 	default:
 		print_error(file_data.name, UNREC_TOKEN, file_data.line_num, (char[2]){(char)c, '\0'});
 		break;
 	}
-
-	return tok;
-}
-/*
-return_type factor(FILE *file) {
-	next_token = scan(file);
-	if (next_token->type == '(') {
-		return_type ret = factor(file);
-		if (!ret.is_valid) {
-			return ret;
-		}
-		next_token = scan(file);
-		if (next_token->type == ')') {
-			return (return_type){1};
-		}
-		return (return_type){2};
-	}
-	if (next_token->type == '-') {
-		next_token = scan(file);
-		if (next_token->type == T_IDENT) {
-			return (return_type){1};
-		}
-		if (next_token->type == T_NUM_LIT) {
-			return (return_type){1};
-		}
-		return (return_type){2};
-	}
-	if (next_token->type == )
+	printf("Scanned token: %d\n", t->type);
+	return t;
 }
 
-return_type parse(FILE *file) {
-	return factor(file);
+int expression(FILE *file);
+
+int argument_list_prime(FILE *file) {
+	ASSERT(expression(file))
+	tok = scan(file);
+	if (tok->type == T_COMMA) {
+		tok = scan(file);
+		ASSERT(argument_list_prime(file))
+	}
+	else unscan(tok);
+	return 1;
 }
-*/
+
+int argument_list(FILE *file) {
+	if (tok->type != T_RPAREN) {
+		ASSERT(argument_list_prime(file))
+	}
+	else unscan(tok);
+	return 1;
+}
+
+int location_tail(FILE *file) {
+	ASSERT(expression(file))
+	tok = scan(file);
+	ASSERT(tok->type == T_RBRACK)
+	return 1;
+}
+
+int location(FILE *file) {
+	ASSERT(tok->type == T_IDENT)
+	tok = scan(file);
+	if (tok->type == T_LBRACK) {
+		tok = scan(file);
+		ASSERT(location_tail(file));
+	}
+	else unscan(tok);
+	return 1;
+}
+
+int procedure_call_tail(FILE *file) {
+	ASSERT(argument_list(file))
+	tok = scan(file);
+	ASSERT(tok->type == T_RPAREN)
+	return 1;
+}
+
+int ident_tail(FILE *file) {
+	if (tok->type == T_LBRACK) {
+		tok = scan(file);
+		ASSERT(location_tail(file))
+	}
+	else if (tok->type == T_LPAREN) {
+		tok = scan(file);
+		ASSERT(procedure_call_tail(file))
+	} 
+	else unscan(tok);
+	return 1;
+}
+
+int factor(FILE *file) {
+	if (tok->type == T_LPAREN) {
+		tok = scan(file);
+		ASSERT(expression(file))
+		tok = scan(file);
+		ASSERT(tok->type == T_RPAREN)
+	}
+	else if (tok->subtype == T_ST_MINUS) {
+		tok = scan(file);
+		if (tok->type == T_IDENT) {
+			tok = scan(file);
+			ASSERT(ident_tail(file))
+		}
+		else ASSERT(tok->type == T_NUM_LIT)
+	}
+	else if (tok->type == T_IDENT) {
+		tok = scan(file);
+		ASSERT(ident_tail(file));
+	}
+	else ASSERT(tok->type == T_NUM_LIT || tok->type == T_STR_LIT || tok->type == T_BOOL_LIT)
+	return 1;
+}
+
+int term_prime(FILE *file) {
+	if (tok->type == T_TERM_OP) {
+		tok = scan(file);
+		ASSERT(factor(file))
+		tok = scan(file);
+		ASSERT(term_prime(file))
+	}
+	else unscan(tok);
+	return 1;
+}
+
+int term(FILE *file) {
+	ASSERT(factor(file))
+	tok = scan(file);
+	ASSERT(term_prime(file))
+	return 1;
+}
+
+int relation_prime(FILE *file) {
+	if (tok->type == T_REL_OP) {
+		tok = scan(file);
+		ASSERT(term(file))
+		tok = scan(file);
+		ASSERT(relation_prime(file))
+	}
+	else unscan(tok);
+	return 1;
+}
+
+int relation(FILE *file) {
+	ASSERT(term(file))
+	tok = scan(file);
+	ASSERT(relation_prime(file))
+	return 1;
+}
+
+int arith_op_prime(FILE *file) {
+	if (tok->type == T_ARITH_OP) {
+		tok = scan(file);
+		ASSERT(relation(file))
+		tok = scan(file);
+		ASSERT(arith_op_prime(file))
+	}
+	else unscan(tok);
+	return 1;
+}
+
+int arith_op(FILE *file) {
+	ASSERT(relation(file))
+	tok = scan(file);
+	ASSERT(arith_op_prime(file))
+	return 1;
+}
+
+int expression_prime(FILE *file) {
+	if (tok->type == T_EXPR_OP) {
+		tok = scan(file);
+		ASSERT(arith_op(file))
+		tok = scan(file);
+		ASSERT(expression_prime(file))
+	}
+	else unscan(tok);
+	return 1;
+}
+
+int expression(FILE *file) {
+	if (tok->type == T_NOT) {
+		tok = scan(file);
+	}
+	ASSERT(arith_op(file))
+	tok = scan(file);
+	ASSERT(expression_prime(file))
+	return 1;
+}
+
+int assignment_statement(FILE *file) {
+	if (tok->type == T_IDENT) {
+		ASSERT(location(file))
+		tok = scan(file);
+		ASSERT(tok->type == T_ASSMT)
+		tok = scan(file);
+		ASSERT(expression(file));
+		tok = scan(file);
+		ASSERT(tok->type == T_SEMICOLON)
+	}
+	else return 0;
+	return 1;
+}
+
+int statement(FILE *file);
+
+int if_statement(FILE *file) {
+	if (tok->type == T_IF) {
+		tok = scan(file);
+		ASSERT(tok->type == T_LPAREN)
+		tok = scan(file);
+		ASSERT(expression(file))
+		tok = scan(file);
+		ASSERT(tok->type == T_RPAREN)
+		tok = scan(file);
+		ASSERT(tok->type == T_THEN)
+		tok = scan(file);
+		while (tok->type != T_END && tok->type != T_ELSE) {
+			ASSERT(statement(file))
+			tok = scan(file);
+			ASSERT(tok->type != T_EOF)
+		}
+		if (tok->type == T_ELSE) {
+			tok = scan(file);
+			while (tok->type != T_END) {
+				ASSERT(statement(file))
+				tok = scan(file);
+				ASSERT(tok->type != T_EOF)
+			}
+		}
+		tok = scan(file);
+		ASSERT(tok->type == T_IF)
+		tok = scan(file);
+		ASSERT(tok->type == T_SEMICOLON)
+	}
+	else return 0;
+	return 1;
+}
+
+int for_statement(FILE *file) {
+	if (tok->type == T_FOR) {
+		tok = scan(file);
+		ASSERT(tok->type == T_LPAREN)
+		tok = scan(file);
+		ASSERT(assignment_statement(file))
+		tok = scan(file);
+		ASSERT(expression(file))
+		tok = scan(file);
+		ASSERT(tok->type == T_RPAREN)
+		tok = scan(file);
+		while (tok->type != T_END) {
+			ASSERT(statement(file))
+			tok = scan(file);
+			ASSERT(tok->type != T_EOF)
+		}
+		tok = scan(file);
+		ASSERT(tok->type == T_FOR)
+		tok = scan(file);
+		ASSERT(tok->type == T_SEMICOLON)
+	}
+	else return 0;
+	return 1;
+}
+
+int return_statement(FILE *file) {
+	if (tok->type == T_RETURN) {
+		tok = scan(file);
+		ASSERT(expression(file))
+		tok = scan(file);
+		ASSERT(tok->type == T_SEMICOLON)
+	}
+	else return 0;
+	return 1;
+}
+
+int statement(FILE *file) {
+	switch (tok->type) {
+	case T_IDENT:
+		ASSERT(assignment_statement(file))
+		break;
+	case T_IF:
+		ASSERT(if_statement(file))
+		break;
+	case T_FOR:
+		ASSERT(for_statement(file))
+		break;
+	case T_RETURN:
+		ASSERT(return_statement(file))
+		break;
+	default:
+		return 0;
+	}
+	return 1;
+}
+
+int variable_declaration(FILE *file) {
+	ASSERT(tok->type == T_IDENT)
+	tok = scan(file);
+	ASSERT(tok->type == T_COLON)
+	tok = scan(file);
+	ASSERT(tok->type == T_TYPE)
+	tok = scan(file);
+	if (tok->type == T_LBRACK) {
+		tok = scan(file);
+		ASSERT(tok->subtype == T_ST_INT_LIT)
+		tok = scan(file);
+		ASSERT(tok->type == T_RBRACK);
+	}
+	else unscan(tok);
+	return 1;
+}
+
+int parameter_list(FILE *file) {
+	ASSERT(variable_declaration(file))
+	tok = scan(file);
+	if (tok->type == T_COMMA) {
+		tok = scan(file);
+		ASSERT(tok->type = T_VARIABLE)
+		tok = scan(file);
+		ASSERT(parameter_list(file))
+	}
+	else unscan(tok);
+	return 1;
+}
+
+int declaration(FILE *file);
+
+int procedure_body(FILE *file) {
+	while (tok->type != T_BEGIN) {
+		ASSERT(declaration(file))
+		tok = scan(file);
+	}
+	tok = scan(file);
+	while (tok->type != T_END) {
+		ASSERT(statement(file))
+		tok = scan(file);
+	}
+	tok = scan(file);
+	ASSERT(tok->type == T_PROCEDURE)
+	return 1;
+}
+
+int procedure_declaration(FILE *file) {
+	ASSERT(tok->type == T_IDENT)
+	tok = scan(file);
+	ASSERT(tok->type == T_COLON)
+	tok = scan(file);
+	ASSERT(tok->type == T_TYPE)
+	tok = scan(file);
+	ASSERT(tok->type == T_LPAREN)
+	tok = scan(file);
+	if (tok->type == T_VARIABLE) {
+		tok = scan(file);
+		ASSERT(parameter_list(file))
+	}
+	else unscan(tok);
+	tok = scan(file);
+	ASSERT(tok->type == T_RPAREN)
+	tok = scan(file);
+	ASSERT(procedure_body(file))
+	return 1;
+}
+
+int declaration(FILE *file) {
+	if (tok->type == T_GLOBAL) {
+		tok = scan(file);
+	}
+	if (tok->type == T_PROCEDURE) {
+		tok = scan(file);
+		ASSERT(procedure_declaration(file))
+	}
+	else if (tok->type == T_VARIABLE) {
+		tok = scan(file);
+		ASSERT(variable_declaration(file))
+	}
+	tok = scan(file);
+	ASSERT(tok->type == T_SEMICOLON)
+	return 1;
+}
+
+int program_body(FILE *file) {
+	while (tok->type != T_BEGIN) {
+		ASSERT(declaration(file))
+		tok = scan(file);
+	}
+	tok = scan(file);
+	while (tok->type != T_END) {
+		ASSERT(statement(file))
+		tok = scan(file);
+	}
+	tok = scan(file);
+	ASSERT(tok->type == T_PROGRAM)
+	return 1;
+}
+
+int program(FILE *file) {
+	ASSERT(tok->type == T_PROGRAM)
+	tok = scan(file);
+	ASSERT(tok->type == T_IDENT)
+	tok = scan(file);
+	ASSERT(tok->type == T_IS)
+	tok = scan(file);
+	ASSERT(program_body(file))
+	tok = scan(file);
+	ASSERT(tok->type == T_PERIOD)
+	return 1;
+}
+
+int parse(FILE *file) {
+	tok = scan(file);
+	ASSERT(program(file))
+	tok = scan(file);
+	ASSERT(tok->type == T_EOF)
+	return 1;
+}
 
 int compile(FILE *file) {
 	
 	init_symbol_table();
-	parse_tree_root = ast_create();
+	//parse_tree_root = ast_create();
 
-	// return_type output = parse(file);
+	int output = parse(file);
 
-	while (scan(file)->type != T_EOF) {}
+	printf("Parse: %d\n", output);
 
 	destroy_symbol_table();
-	//ast_destroy(root);
+	//ast_destroy(parse_tree_root);
 
 	return 0;
-	//return output.is_valid;
 }
 
 int main(int argc, char *argv[]) {
