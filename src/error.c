@@ -10,7 +10,7 @@ void print_error(char* file_name, error_type type, int line, ...) {
 	switch (type)
 	{
 	case UNREC_TOKEN:
-		printf("error: unrecognized token '%s'", args);
+		vprintf("error: unrecognized token '%s'", args);
 		break;
 	case UNCLOSED_COMMENT:
 		printf("error: unterminated comment");
@@ -21,8 +21,9 @@ void print_error(char* file_name, error_type type, int line, ...) {
 	case EXTRA_DEC_PT:
 		printf("error: too many decimal points in number");
 		break;
-	case EXPECTED_TOKEN:
-		printf("error: at token '%s', expecting token '%s'", args);
+	case MISSING_TOKEN:
+		vprintf("error: expected %s, got %s token", args);
+		break;
 	}
 	printf("\n");
 }

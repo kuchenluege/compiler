@@ -8,36 +8,43 @@
 #include "compiler/error.h"
 
 #define ASSERT(X) if (!(X)) return 0;
+#define ASSERT_TOKEN(X, X_STR) if (tok->type != X) {\
+	print_error(file_data.name, MISSING_TOKEN, file_data.line_num, X_STR, tok->display_name);\
+	return 0;\
+}
 
 struct file_data {
 	char* name;
 	int line_num;
 } file_data = {"", 1};
 
-ht *symbol_table = NULL;
+ht *global_symbol_table = NULL;
+ht *local_symbol_table = NULL;
 ast *parse_tree_root = NULL;
 token *tok = NULL;
-token *unscanned_tok = NULL;
+int unscanned = 0;
 
 void init_symbol_table() {
-	symbol_table = ht_create();
+	global_symbol_table = ht_create();
 	size_t rw_len = sizeof(RES_WORDS) / sizeof(char*);
 
 	for (size_t i = 0; i < rw_len; i++) {
 		token *rw_token = (token*)malloc(sizeof(token));
 		rw_token->type = RW_TOKEN_TYPES[i];
 		rw_token->subtype = RW_TOKEN_SUBTYPES[i];
+		rw_token->display_name = RW_DISP_NAMES[i];
+		rw_token->isSymbol = 1;
 		strcpy(rw_token->lex_val.str_val, RES_WORDS[i]);
-		ht_set(symbol_table, RES_WORDS[i], rw_token);
+		ht_set(global_symbol_table, RES_WORDS[i], rw_token);
 	}
 }
 
 void destroy_symbol_table() {
-	hti iter = ht_iterator(symbol_table);
+	hti iter = ht_iterator(global_symbol_table);
 	while (ht_next(&iter)) {
 		free(iter.value);
 	}
-	ht_destroy(symbol_table);
+	ht_destroy(global_symbol_table);
 }
 
 int get_char(FILE *file) {
@@ -56,9 +63,9 @@ void unget_char(int c, FILE *file) {
 }
 
 void ignore_whitespace(int *c_addr, FILE *file) {
-	do {
+	while (isspace(*c_addr)) {
 		*c_addr = get_char(file);
-	} while (isspace(*c_addr));
+	}
 }
 
 void ignore_comments_whitespace(int *c_addr, FILE *file) {
@@ -122,82 +129,115 @@ void ignore_comments_whitespace(int *c_addr, FILE *file) {
 
 void unscan(token *t) {
 	printf("(Unscanned token: %d)\n", t->type);
-	unscanned_tok = t;
+	unscanned = 1;
 }
 
-token *scan(FILE *file) {
-	if (unscanned_tok) {
-		printf("(Rescanned token: %d)\n", unscanned_tok->type);
-		token *tmp = unscanned_tok;
-		unscanned_tok = NULL;
-		return tmp;
+void scan(FILE *file) {
+	if (unscanned) {
+		printf("(Rescanned token: %d)\n", tok->type);
+		unscanned = 0;
+		return;
+	}
+	else if (tok != NULL && !tok->isSymbol) {
+		free(tok);
 	}
 	
 	int c;
+	c = get_char(file);
 	ignore_comments_whitespace(&c, file);
 
-	token *t = (token*)malloc(sizeof(token));
-	t->type = T_UNKNOWN;
-	t->subtype = T_ST_NONE;
-	t->tag = T_TAG_NONE;
+	tok = (token*)malloc(sizeof(token));
+	tok->type = T_UNKNOWN;
+	tok->subtype = T_ST_NONE;
+	tok->isSymbol = 0;
+	tok->tag = T_TAG_NONE;
 
 	switch (c) {
 	case T_PERIOD:
+		tok->type = c;
+		tok->display_name = "'.'";
+		break;
 	case T_SEMICOLON:
+		tok->type = c;
+		tok->display_name = "';'";
+		break;
 	case T_LPAREN:
+		tok->type = c;
+		tok->display_name = "'('";
+		break;
 	case T_RPAREN:
+		tok->type = c;
+		tok->display_name = "')'";
+		break;
 	case T_COMMA:
+		tok->type = c;
+		tok->display_name = "','";
+		break;
 	case T_LBRACK:
+		tok->type = c;
+		tok->display_name = "'['";
+		break;
 	case T_RBRACK:
-		t->type = c;
+		tok->type = c;
+		tok->display_name = "']'";
 		break;
 	case '&':
-		t->type = T_EXPR_OP;
-		t->subtype = T_ST_AND; 
+		tok->type = T_EXPR_OP;
+		tok->subtype = T_ST_AND; 
+		tok->display_name = "'&'";
 		break;
 	case '|':
-		t->type = T_EXPR_OP;
-		t->subtype = T_ST_OR;
+		tok->type = T_EXPR_OP;
+		tok->subtype = T_ST_OR;
+		tok->display_name = "'|'";
 		break;
 	case '+':
-		t->type = T_ARITH_OP;
-		t->subtype = T_ST_PLUS; 
+		tok->type = T_ARITH_OP;
+		tok->subtype = T_ST_PLUS;
+		tok->display_name = "'+'";
 		break;
 	case '-':
-		t->type = T_ARITH_OP;
-		t->subtype = T_ST_MINUS;
+		tok->type = T_ARITH_OP;
+		tok->subtype = T_ST_MINUS;
+		tok->display_name = "'-'";
 		break;
 	case '*':
-		t->type = T_TERM_OP;
-		t->subtype = T_ST_MULT;
+		tok->type = T_TERM_OP;
+		tok->subtype = T_ST_MULT;
+		tok->display_name = "'*'";
 		break;
 	case '/':
-		t->type = T_TERM_OP;
-		t->subtype = T_ST_DIVIDE;
+		tok->type = T_TERM_OP;
+		tok->subtype = T_ST_DIVIDE;
+		tok->display_name = "'/'";
 		break;
 	case '<':
 		{
-			t->type = T_REL_OP;
+			tok->type = T_REL_OP;
 			char next_c = get_char(file);
 			if (next_c == '=') {
-				t->subtype = T_ST_LTEQL;
+				tok->subtype = T_ST_LTEQL;
+				tok->display_name = "'<='";
 			}
 			else {
 				unget_char(next_c, file);
-				t->subtype = T_ST_LTHAN;
+				tok->subtype = T_ST_LTHAN;
+				tok->display_name = "'<'";
 			}
 		}
 		break;
 	case '>':
 		{
-			t->type = T_REL_OP;
+			tok->type = T_REL_OP;
 			char next_c = get_char(file);
 			if (next_c == '=') {
-				t->subtype = T_ST_GTEQL;
+				tok->subtype = T_ST_GTEQL;
+				tok->display_name = "'>='";
 			}
 			else {
 				unget_char(next_c, file);
-				t->subtype = T_ST_GTHAN;
+				tok->subtype = T_ST_GTHAN;
+				tok->display_name = "'>'";
 			}
 		}
 		break;
@@ -205,8 +245,9 @@ token *scan(FILE *file) {
 		{
 			char next_c = get_char(file);
 			if (next_c == '=') {
-				t->type = T_REL_OP;
-				t->subtype = T_ST_EQLTO;
+				tok->type = T_REL_OP;
+				tok->subtype = T_ST_EQLTO;
+				tok->display_name = "'=='";
 			}
 			else {
 				// illegal, ignore
@@ -218,8 +259,9 @@ token *scan(FILE *file) {
 		{
 			char next_c = get_char(file);
 			if (next_c == '=') {
-				t->type = T_REL_OP;
-				t->subtype = T_ST_NOTEQ;
+				tok->type = T_REL_OP;
+				tok->subtype = T_ST_NOTEQ;
+				tok->display_name = "'!='";
 			}
 			else {
 				// illegal, ignore
@@ -231,27 +273,30 @@ token *scan(FILE *file) {
 		{
 			char next_c = get_char(file);
 			if (next_c == '=') {
-				t->type = T_ASSMT;
+				tok->type = T_ASSMT;
+				tok->display_name = "':='";
 			}
 			else {
 				unget_char(next_c, file);
-				t->type = T_COLON;
+				tok->type = T_COLON;
+				tok->display_name = "':'";
 			}
 		}
 		break;
 	case '\"':
 		{
-			t->type = T_STR_LIT;
-			t->tag = T_TAG_STR;
+			tok->type = T_STR_LIT;
+			tok->tag = T_TAG_STR;
 			int str_line_num = file_data.line_num;
 			size_t i = 0;
 			c = get_char(file);
 			while (c != '\"' && c != EOF) {
-				t->lex_val.str_val[i] = c;
+				tok->lex_val.str_val[i] = c;
 				c = get_char(file);
 				i++;
 			}
-			t->lex_val.str_val[i] = '\0';
+			tok->lex_val.str_val[i] = '\0';
+			tok->display_name = "string literal";
 
 			if (c == EOF)
 				print_error(file_data.name, UNCLOSED_STR, str_line_num, "");
@@ -260,75 +305,78 @@ token *scan(FILE *file) {
 	case 'A'...'Z':
 	case 'a'...'z':
 		{
-			t->type = T_IDENT;
+			tok->isSymbol = 1;
+			tok->tag = T_TAG_STR;
 			size_t i = 0;
 			do {
-				t->lex_val.str_val[i] = toupper(c);
+				tok->lex_val.str_val[i] = toupper(c);
 				c = get_char(file);
 				i++;
 			} while (isalnum(c) || c == '_');
 			unget_char(c, file);
-			t->lex_val.str_val[i] = '\0';
+			tok->lex_val.str_val[i] = '\0';
 			
-			token *existing_token = ht_get(symbol_table, t->lex_val.str_val);
+			token *existing_token = ht_get(global_symbol_table, tok->lex_val.str_val);
 			if (existing_token == NULL) {
-				ht_set(symbol_table, t->lex_val.str_val, t);
+				tok->type = T_IDENT;
+				tok->display_name = "identifier";
+				ht_set(global_symbol_table, tok->lex_val.str_val, tok);
 			} else {
-				free(t);
-				t = existing_token;
+				free(tok);
+				tok = existing_token;
 			}
 		}
 		break;
 	case '0'...'9':
 		{
-			t->type = T_NUM_LIT;
+			tok->type = T_NUM_LIT;
 			
 			int num_line_num = file_data.line_num;
 			int dec_pt_cnt = 0;
 			size_t i = 0;
 			do {
-				t->lex_val.str_val[i] = toupper(c);
+				tok->lex_val.str_val[i] = toupper(c);
 				c = get_char(file);
 				i++;
 				if (c == '.') dec_pt_cnt++;
 			} while (isdigit(c) || c == '.');
 			unget_char(c, file);
-			t->lex_val.str_val[i] = '\0';
+			tok->lex_val.str_val[i] = '\0';
 
 			if (dec_pt_cnt > 1) {
 				print_error(file_data.name, EXTRA_DEC_PT, num_line_num, "");
-				t->type = T_UNKNOWN;
+				tok->type = T_UNKNOWN;
 			}
 			else if (dec_pt_cnt == 1) {
-				t->subtype = T_ST_FLOAT_LIT;
-				t->tag = T_TAG_FLT;
-				t->lex_val.flt_val = atof(t->lex_val.str_val);
+				tok->subtype = T_ST_FLOAT_LIT;
+				tok->tag = T_TAG_FLT;
+				tok->lex_val.flt_val = atof(tok->lex_val.str_val);
 			}
 			else {
-				t->subtype = T_ST_INT_LIT;
-				t->tag = T_TAG_INT;
-				t->lex_val.int_val = atoi(t->lex_val.str_val);
+				tok->subtype = T_ST_INT_LIT;
+				tok->tag = T_TAG_INT;
+				tok->lex_val.int_val = atoi(tok->lex_val.str_val);
 			}
 		}
 		break;
 	case EOF:
-		t->type = T_EOF;
+		tok->type = T_EOF;
+		tok->display_name = "end of file";
 		break;
 	default:
 		print_error(file_data.name, UNREC_TOKEN, file_data.line_num, (char[2]){(char)c, '\0'});
 		break;
 	}
-	printf("Scanned token: %d\n", t->type);
-	return t;
+	printf("Scanned token: %d\n", tok->type);
 }
 
 int expression(FILE *file);
 
 int argument_list_prime(FILE *file) {
 	ASSERT(expression(file))
-	tok = scan(file);
+	scan(file);
 	if (tok->type == T_COMMA) {
-		tok = scan(file);
+		scan(file);
 		ASSERT(argument_list_prime(file))
 	}
 	else unscan(tok);
@@ -345,16 +393,16 @@ int argument_list(FILE *file) {
 
 int location_tail(FILE *file) {
 	ASSERT(expression(file))
-	tok = scan(file);
-	ASSERT(tok->type == T_RBRACK)
+	scan(file);
+	ASSERT_TOKEN(T_RBRACK, "']'")
 	return 1;
 }
 
 int location(FILE *file) {
-	ASSERT(tok->type == T_IDENT)
-	tok = scan(file);
+	ASSERT_TOKEN(T_IDENT, "identifier")
+	scan(file);
 	if (tok->type == T_LBRACK) {
-		tok = scan(file);
+		scan(file);
 		ASSERT(location_tail(file));
 	}
 	else unscan(tok);
@@ -363,18 +411,18 @@ int location(FILE *file) {
 
 int procedure_call_tail(FILE *file) {
 	ASSERT(argument_list(file))
-	tok = scan(file);
-	ASSERT(tok->type == T_RPAREN)
+	scan(file);
+	ASSERT_TOKEN(T_RPAREN, "')'")
 	return 1;
 }
 
 int ident_tail(FILE *file) {
 	if (tok->type == T_LBRACK) {
-		tok = scan(file);
+		scan(file);
 		ASSERT(location_tail(file))
 	}
 	else if (tok->type == T_LPAREN) {
-		tok = scan(file);
+		scan(file);
 		ASSERT(procedure_call_tail(file))
 	} 
 	else unscan(tok);
@@ -383,32 +431,35 @@ int ident_tail(FILE *file) {
 
 int factor(FILE *file) {
 	if (tok->type == T_LPAREN) {
-		tok = scan(file);
+		scan(file);
 		ASSERT(expression(file))
-		tok = scan(file);
-		ASSERT(tok->type == T_RPAREN)
+		scan(file);
+		ASSERT_TOKEN(T_RPAREN, "')'")
 	}
 	else if (tok->subtype == T_ST_MINUS) {
-		tok = scan(file);
+		scan(file);
 		if (tok->type == T_IDENT) {
-			tok = scan(file);
+			scan(file);
 			ASSERT(ident_tail(file))
 		}
-		else ASSERT(tok->type == T_NUM_LIT)
+		else ASSERT_TOKEN(T_NUM_LIT, "identifier or numeric literal")
 	}
 	else if (tok->type == T_IDENT) {
-		tok = scan(file);
+		scan(file);
 		ASSERT(ident_tail(file));
 	}
-	else ASSERT(tok->type == T_NUM_LIT || tok->type == T_STR_LIT || tok->type == T_BOOL_LIT)
+	else if (tok->type != T_NUM_LIT && tok->type != T_STR_LIT && tok->type != T_BOOL_LIT) {
+		print_error(file_data.name, MISSING_TOKEN, file_data.line_num, "factor", tok->display_name);
+		return 0;
+	}
 	return 1;
 }
 
 int term_prime(FILE *file) {
 	if (tok->type == T_TERM_OP) {
-		tok = scan(file);
+		scan(file);
 		ASSERT(factor(file))
-		tok = scan(file);
+		scan(file);
 		ASSERT(term_prime(file))
 	}
 	else unscan(tok);
@@ -417,16 +468,16 @@ int term_prime(FILE *file) {
 
 int term(FILE *file) {
 	ASSERT(factor(file))
-	tok = scan(file);
+	scan(file);
 	ASSERT(term_prime(file))
 	return 1;
 }
 
 int relation_prime(FILE *file) {
 	if (tok->type == T_REL_OP) {
-		tok = scan(file);
+		scan(file);
 		ASSERT(term(file))
-		tok = scan(file);
+		scan(file);
 		ASSERT(relation_prime(file))
 	}
 	else unscan(tok);
@@ -435,16 +486,16 @@ int relation_prime(FILE *file) {
 
 int relation(FILE *file) {
 	ASSERT(term(file))
-	tok = scan(file);
+	scan(file);
 	ASSERT(relation_prime(file))
 	return 1;
 }
 
 int arith_op_prime(FILE *file) {
 	if (tok->type == T_ARITH_OP) {
-		tok = scan(file);
+		scan(file);
 		ASSERT(relation(file))
-		tok = scan(file);
+		scan(file);
 		ASSERT(arith_op_prime(file))
 	}
 	else unscan(tok);
@@ -453,16 +504,16 @@ int arith_op_prime(FILE *file) {
 
 int arith_op(FILE *file) {
 	ASSERT(relation(file))
-	tok = scan(file);
+	scan(file);
 	ASSERT(arith_op_prime(file))
 	return 1;
 }
 
 int expression_prime(FILE *file) {
 	if (tok->type == T_EXPR_OP) {
-		tok = scan(file);
+		scan(file);
 		ASSERT(arith_op(file))
-		tok = scan(file);
+		scan(file);
 		ASSERT(expression_prime(file))
 	}
 	else unscan(tok);
@@ -471,96 +522,84 @@ int expression_prime(FILE *file) {
 
 int expression(FILE *file) {
 	if (tok->type == T_NOT) {
-		tok = scan(file);
+		scan(file);
 	}
 	ASSERT(arith_op(file))
-	tok = scan(file);
+	scan(file);
 	ASSERT(expression_prime(file))
 	return 1;
 }
 
 int assignment_statement(FILE *file) {
-	if (tok->type == T_IDENT) {
-		ASSERT(location(file))
-		tok = scan(file);
-		ASSERT(tok->type == T_ASSMT)
-		tok = scan(file);
-		ASSERT(expression(file));
-		tok = scan(file);
-		ASSERT(tok->type == T_SEMICOLON)
-	}
-	else return 0;
+	ASSERT(location(file))
+	scan(file);
+	ASSERT_TOKEN(T_ASSMT, "':='")
+	scan(file);
+	ASSERT(expression(file));
+	scan(file);
+	ASSERT_TOKEN(T_SEMICOLON, "';'")
 	return 1;
 }
 
 int statement(FILE *file);
 
 int if_statement(FILE *file) {
-	if (tok->type == T_IF) {
-		tok = scan(file);
-		ASSERT(tok->type == T_LPAREN)
-		tok = scan(file);
-		ASSERT(expression(file))
-		tok = scan(file);
-		ASSERT(tok->type == T_RPAREN)
-		tok = scan(file);
-		ASSERT(tok->type == T_THEN)
-		tok = scan(file);
-		while (tok->type != T_END && tok->type != T_ELSE) {
-			ASSERT(statement(file))
-			tok = scan(file);
-			ASSERT(tok->type != T_EOF)
-		}
-		if (tok->type == T_ELSE) {
-			tok = scan(file);
-			while (tok->type != T_END) {
-				ASSERT(statement(file))
-				tok = scan(file);
-				ASSERT(tok->type != T_EOF)
-			}
-		}
-		tok = scan(file);
-		ASSERT(tok->type == T_IF)
-		tok = scan(file);
-		ASSERT(tok->type == T_SEMICOLON)
+	ASSERT_TOKEN(T_IF, "'IF'")
+	scan(file);
+	ASSERT_TOKEN(T_LPAREN, "'('")
+	scan(file);
+	ASSERT(expression(file))
+	scan(file);
+	ASSERT_TOKEN(T_RPAREN, "')'")
+	scan(file);
+	ASSERT_TOKEN(T_THEN, "'THEN'")
+	scan(file);
+	while (tok->type != T_END && tok->type != T_ELSE) {
+		ASSERT(statement(file))
+		scan(file);
 	}
-	else return 0;
+	if (tok->type == T_ELSE) {
+		scan(file);
+		while (tok->type != T_END) {
+			ASSERT(statement(file))
+			scan(file);
+		}
+	}
+	scan(file);
+	ASSERT_TOKEN(T_IF, "'IF'")
+	scan(file);
+	ASSERT_TOKEN(T_SEMICOLON, "';'")
 	return 1;
 }
 
 int for_statement(FILE *file) {
-	if (tok->type == T_FOR) {
-		tok = scan(file);
-		ASSERT(tok->type == T_LPAREN)
-		tok = scan(file);
-		ASSERT(assignment_statement(file))
-		tok = scan(file);
-		ASSERT(expression(file))
-		tok = scan(file);
-		ASSERT(tok->type == T_RPAREN)
-		tok = scan(file);
-		while (tok->type != T_END) {
-			ASSERT(statement(file))
-			tok = scan(file);
-			ASSERT(tok->type != T_EOF)
-		}
-		tok = scan(file);
-		ASSERT(tok->type == T_FOR)
-		tok = scan(file);
-		ASSERT(tok->type == T_SEMICOLON)
+	ASSERT_TOKEN(T_FOR, "'FOR'")
+	scan(file);
+	ASSERT_TOKEN(T_LPAREN, "'('")
+	scan(file);
+	ASSERT(assignment_statement(file))
+	scan(file);
+	ASSERT(expression(file))
+	scan(file);
+	ASSERT_TOKEN(T_RPAREN, "')'")
+	scan(file);
+	while (tok->type != T_END) {
+		ASSERT(statement(file))
+		scan(file);
 	}
-	else return 0;
+	scan(file);
+	ASSERT_TOKEN(T_FOR, "'FOR'")
+	scan(file);
+	ASSERT_TOKEN(T_SEMICOLON, "';'")
 	return 1;
 }
 
 int return_statement(FILE *file) {
-	if (tok->type == T_RETURN) {
-		tok = scan(file);
-		ASSERT(expression(file))
-		tok = scan(file);
-		ASSERT(tok->type == T_SEMICOLON)
-	}
-	else return 0;
+	ASSERT_TOKEN(T_RETURN, "'RETURN'")
+	scan(file);
+	ASSERT(expression(file))
+	scan(file);
+	ASSERT_TOKEN(T_SEMICOLON, "';'")
 	return 1;
 }
 
@@ -579,23 +618,24 @@ int statement(FILE *file) {
 		ASSERT(return_statement(file))
 		break;
 	default:
+		print_error(file_data.name, MISSING_TOKEN, file_data.line_num, "statement", tok->display_name);
 		return 0;
 	}
 	return 1;
 }
 
 int variable_declaration(FILE *file) {
-	ASSERT(tok->type == T_IDENT)
-	tok = scan(file);
-	ASSERT(tok->type == T_COLON)
-	tok = scan(file);
-	ASSERT(tok->type == T_TYPE)
-	tok = scan(file);
+	ASSERT_TOKEN(T_IDENT, "identifier")
+	scan(file);
+	ASSERT_TOKEN(T_COLON, "':'")
+	scan(file);
+	ASSERT_TOKEN(T_TYPE, "type")
+	scan(file);
 	if (tok->type == T_LBRACK) {
-		tok = scan(file);
+		scan(file);
 		ASSERT(tok->subtype == T_ST_INT_LIT)
-		tok = scan(file);
-		ASSERT(tok->type == T_RBRACK);
+		scan(file);
+		ASSERT_TOKEN(T_RBRACK, "']'");
 	}
 	else unscan(tok);
 	return 1;
@@ -603,11 +643,11 @@ int variable_declaration(FILE *file) {
 
 int parameter_list(FILE *file) {
 	ASSERT(variable_declaration(file))
-	tok = scan(file);
+	scan(file);
 	if (tok->type == T_COMMA) {
-		tok = scan(file);
-		ASSERT(tok->type = T_VARIABLE)
-		tok = scan(file);
+		scan(file);
+		ASSERT_TOKEN(T_VARIABLE, "'VARIABLE'")
+		scan(file);
 		ASSERT(parameter_list(file))
 	}
 	else unscan(tok);
@@ -619,89 +659,96 @@ int declaration(FILE *file);
 int procedure_body(FILE *file) {
 	while (tok->type != T_BEGIN) {
 		ASSERT(declaration(file))
-		tok = scan(file);
+		scan(file);
 	}
-	tok = scan(file);
+	scan(file);
 	while (tok->type != T_END) {
 		ASSERT(statement(file))
-		tok = scan(file);
+		scan(file);
 	}
-	tok = scan(file);
-	ASSERT(tok->type == T_PROCEDURE)
+	scan(file);
+	ASSERT_TOKEN(T_PROCEDURE, "'PROCEDURE'")
 	return 1;
 }
 
 int procedure_declaration(FILE *file) {
-	ASSERT(tok->type == T_IDENT)
-	tok = scan(file);
-	ASSERT(tok->type == T_COLON)
-	tok = scan(file);
-	ASSERT(tok->type == T_TYPE)
-	tok = scan(file);
-	ASSERT(tok->type == T_LPAREN)
-	tok = scan(file);
+	ASSERT_TOKEN(T_IDENT, "identifier")
+	scan(file);
+	ASSERT_TOKEN(T_COLON, "':'")
+	scan(file);
+	ASSERT_TOKEN(T_TYPE, "type")
+	scan(file);
+	ASSERT_TOKEN(T_LPAREN, "'('")
+	scan(file);
 	if (tok->type == T_VARIABLE) {
-		tok = scan(file);
+		scan(file);
 		ASSERT(parameter_list(file))
 	}
 	else unscan(tok);
-	tok = scan(file);
-	ASSERT(tok->type == T_RPAREN)
-	tok = scan(file);
+	scan(file);
+	ASSERT_TOKEN(T_RPAREN, "')'")
+	scan(file);
 	ASSERT(procedure_body(file))
 	return 1;
 }
 
 int declaration(FILE *file) {
 	if (tok->type == T_GLOBAL) {
-		tok = scan(file);
+		scan(file);
 	}
 	if (tok->type == T_PROCEDURE) {
-		tok = scan(file);
+		scan(file);
 		ASSERT(procedure_declaration(file))
 	}
 	else if (tok->type == T_VARIABLE) {
-		tok = scan(file);
+		scan(file);
 		ASSERT(variable_declaration(file))
 	}
-	tok = scan(file);
-	ASSERT(tok->type == T_SEMICOLON)
+	else {
+		print_error(file_data.name, MISSING_TOKEN, file_data.line_num, "declaration", tok->display_name);
+		return 0;
+	}
+	scan(file);
+	ASSERT_TOKEN(T_SEMICOLON, "';'")
 	return 1;
 }
 
 int program_body(FILE *file) {
 	while (tok->type != T_BEGIN) {
 		ASSERT(declaration(file))
-		tok = scan(file);
+		scan(file);
 	}
-	tok = scan(file);
+	scan(file);
 	while (tok->type != T_END) {
 		ASSERT(statement(file))
-		tok = scan(file);
+		scan(file);
 	}
-	tok = scan(file);
-	ASSERT(tok->type == T_PROGRAM)
+	scan(file);
+	ASSERT_TOKEN(T_PROGRAM, "'PROGRAM'")
 	return 1;
 }
 
 int program(FILE *file) {
-	ASSERT(tok->type == T_PROGRAM)
-	tok = scan(file);
-	ASSERT(tok->type == T_IDENT)
-	tok = scan(file);
-	ASSERT(tok->type == T_IS)
-	tok = scan(file);
+	ASSERT_TOKEN(T_PROGRAM, "'PROGRAM'")
+	scan(file);
+	ASSERT_TOKEN(T_IDENT, "identifier")
+	scan(file);
+	ASSERT_TOKEN(T_IS, "'IS'")
+	scan(file);
 	ASSERT(program_body(file))
-	tok = scan(file);
-	ASSERT(tok->type == T_PERIOD)
+	scan(file);
+	ASSERT_TOKEN(T_PERIOD, "'.'")
 	return 1;
 }
 
 int parse(FILE *file) {
-	tok = scan(file);
+	scan(file);
 	ASSERT(program(file))
-	tok = scan(file);
-	ASSERT(tok->type == T_EOF)
+	scan(file);
+	ASSERT_TOKEN(T_EOF, "end of file")
+	if (!tok->isSymbol) {
+		free(tok);
+	}
 	return 1;
 }
 

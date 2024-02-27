@@ -64,7 +64,7 @@ typedef enum token_subtype {
 } token_subtype;
 
 
-const char *RES_WORDS[] =
+char *const RES_WORDS[] =
 	{"PROGRAM", "IS", "BEGIN", "END",
 	 "GLOBAL", "PROCEDURE", "VARIABLE", "IF",
  	 "THEN", "ELSE", "FOR", "RETURN", "TRUE",
@@ -85,6 +85,13 @@ const token_subtype RW_TOKEN_SUBTYPES[] =
  	 T_ST_FALSE, T_ST_NONE, T_ST_INTEGER, T_ST_FLOAT,
  	 T_ST_STRING, T_ST_BOOL};
 
+char *const RW_DISP_NAMES[] =
+	{"'PROGRAM'", "'IS'", "'BEGIN'", "'END'",
+	 "'GLOBAL'", "'PROCEDURE'", "'VARIABLE'", "'IF'",
+ 	 "'THEN'", "'ELSE'", "'FOR'", "'RETURN'", "'TRUE'",
+ 	 "'FALSE'", "'NOT'", "'INTEGER'", "'FLOAT'",
+ 	 "'STRING'", "'BOOL'"};
+
 typedef enum val_tag {
 	T_TAG_NONE = 0, T_TAG_INT, T_TAG_BOOL, T_TAG_FLT, T_TAG_STR
 } val_tag;
@@ -92,6 +99,8 @@ typedef enum val_tag {
 typedef struct {
 	token_type type;
 	token_subtype subtype;
+	const char *display_name;
+	int isSymbol;
 	val_tag tag;
 	union { 
 		int int_val;
