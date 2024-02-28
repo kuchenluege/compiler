@@ -2,8 +2,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <string.h>
-#include "compiler/hash_table.h"
-#include "compiler/abstract_syntax_tree.h"
+#include "compiler/symbol_table_chain.h"
 #include "compiler/token.h"
 #include "compiler/error.h"
 
@@ -18,14 +17,11 @@ struct file_data {
 	int line_num;
 } file_data = {"", 1};
 
-ht *global_symbol_table = NULL;
-ht *local_symbol_table = NULL;
-ast *parse_tree_root = NULL;
+stc *symbol_tables = NULL;
 token *tok = NULL;
 int unscanned = 0;
 
-void init_symbol_table() {
-	global_symbol_table = ht_create();
+void init_keywords() {
 	size_t rw_len = sizeof(RES_WORDS) / sizeof(char*);
 
 	for (size_t i = 0; i < rw_len; i++) {
@@ -35,16 +31,8 @@ void init_symbol_table() {
 		rw_token->display_name = RW_DISP_NAMES[i];
 		rw_token->isSymbol = 1;
 		strcpy(rw_token->lex_val.str_val, RES_WORDS[i]);
-		ht_set(global_symbol_table, RES_WORDS[i], rw_token);
+		stc_put_global(symbol_tables, RES_WORDS[i], rw_token);
 	}
-}
-
-void destroy_symbol_table() {
-	hti iter = ht_iterator(global_symbol_table);
-	while (ht_next(&iter)) {
-		free(iter.value);
-	}
-	ht_destroy(global_symbol_table);
 }
 
 int get_char(FILE *file) {
@@ -106,6 +94,7 @@ void ignore_comments_whitespace(int *c_addr, FILE *file) {
 			}
 
 			if (*c_addr != EOF && next_c != EOF) {
+				*c_addr = get_char(file);
 				ignore_comments_whitespace(c_addr, file);
 			}
 		}
@@ -117,6 +106,7 @@ void ignore_comments_whitespace(int *c_addr, FILE *file) {
 			} while (*c_addr != '\n' && *c_addr != EOF);
 			
 			if (*c_addr != EOF) {
+				*c_addr = get_char(file);
 				ignore_comments_whitespace(c_addr, file);
 			}
 		}
@@ -316,11 +306,11 @@ void scan(FILE *file) {
 			unget_char(c, file);
 			tok->lex_val.str_val[i] = '\0';
 			
-			token *existing_token = ht_get(global_symbol_table, tok->lex_val.str_val);
+			token *existing_token = stc_search(symbol_tables, tok->lex_val.str_val);
 			if (existing_token == NULL) {
 				tok->type = T_IDENT;
 				tok->display_name = "identifier";
-				ht_set(global_symbol_table, tok->lex_val.str_val, tok);
+				stc_put_current_scope(symbol_tables, tok->lex_val.str_val, tok);
 			} else {
 				free(tok);
 				tok = existing_token;
@@ -668,6 +658,7 @@ int procedure_body(FILE *file) {
 	}
 	scan(file);
 	ASSERT_TOKEN(T_PROCEDURE, "'PROCEDURE'")
+	stc_del_local_table(symbol_tables);
 	return 1;
 }
 
@@ -697,6 +688,7 @@ int declaration(FILE *file) {
 		scan(file);
 	}
 	if (tok->type == T_PROCEDURE) {
+		stc_add_local_table(symbol_tables);
 		scan(file);
 		ASSERT(procedure_declaration(file))
 	}
@@ -754,15 +746,14 @@ int parse(FILE *file) {
 
 int compile(FILE *file) {
 	
-	init_symbol_table();
-	//parse_tree_root = ast_create();
+	symbol_tables = stc_create();
+	init_keywords();
 
 	int output = parse(file);
 
 	printf("Parse: %d\n", output);
 
-	destroy_symbol_table();
-	//ast_destroy(parse_tree_root);
+	stc_destroy(symbol_tables);
 
 	return 0;
 }
