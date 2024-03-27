@@ -9,10 +9,15 @@ struct stc {
 };
 
 stc *stc_create() {
+    // Reserved Words
 	stc *head = malloc(sizeof(stc));
 	head->table = ht_create();
 	head->prev = NULL;
-	head->next = NULL;
+    // Global symbols
+	head->next = malloc(sizeof(stc));
+    head->next->table = ht_create();
+    head->next->prev = head;
+    head->next->next = NULL;
 	return head;
 }
 
@@ -20,13 +25,37 @@ void stc_destroy(stc *head) {
 	stc *link = head;
 	while (link != NULL) {
 		stc *tmp = link;
+        hti iter = ht_iterator(tmp->table);
+        while (ht_next(&iter)) {
+            token *t = iter.value;
+            if (t != NULL) {
+                if (t->sym_type == ST_VAR) {
+                    switch (t->sym_val_type)
+                    {
+                    case SVT_INT:
+                        free(t->sym_val.int_ptr);
+                        break;
+                    case SVT_BOOL:
+                        free(t->sym_val.bool_ptr);
+                        break;
+                    case SVT_FLT:
+                        free(t->sym_val.float_ptr);
+                        break;
+                    case SVT_STR:
+                        free(t->sym_val.str_ptr);
+                        break;
+                    }
+                }
+                free(t);
+            }
+        }
 		ht_destroy(tmp->table);
 		link = tmp->next;
 		free(tmp);
 	}
 }
 
-void stc_add_local_table(stc *head) {
+void stc_add_local(stc *head) {
 	stc *link = head;
 	while (link->next != NULL) {
 		link = link->next;
@@ -37,25 +66,54 @@ void stc_add_local_table(stc *head) {
 	link->next->next = NULL;
 }
 
-void stc_del_local_table(stc *head) {
-	if (!head->next) {
-		printf("warning: cannot delete global symbol table");
+void stc_del_local(stc *head) {
+	if (!head->next || !head->next->next) {
+		printf("warning: cannot delete reserved word or global symbol table");
 		return;
 	}
 	stc *link = head->next;
 	while (link->next != NULL) {
 		link = link->next;
 	}
+    hti iter = ht_iterator(link->table);
+    while (ht_next(&iter)) {
+        token *t = iter.value;
+        if (t != NULL) {
+            if (t->sym_type == ST_VAR) {
+                switch (t->sym_val_type)
+                {
+                case SVT_INT:
+                    free(t->sym_val.int_ptr);
+                    break;
+                case SVT_BOOL:
+                    free(t->sym_val.bool_ptr);
+                    break;
+                case SVT_FLT:
+                    free(t->sym_val.float_ptr);
+                    break;
+                case SVT_STR:
+                    free(t->sym_val.str_ptr);
+                    break;
+                }
+            }
+            printf("Freeing symbol: %s\n", t->display_name);
+            free(t);
+        }
+    }
 	ht_destroy(link->table);
 	link->prev->next = NULL;
 	free(link);
 }
 
-void stc_put_global(stc *head, const char *name, void *symbol) {
+void stc_put_res_word(stc *head, const char *name, token *symbol) {
 	ht_set(head->table, name, symbol);
 }
 
-void stc_put_current_scope(stc *head, const char *name, void *symbol) {
+void stc_put_global(stc *head, const char *name, token *symbol) {
+	ht_set(head->next->table, name, symbol);
+}
+
+void stc_put_local(stc *head, const char *name, token *symbol) {
 	stc *link = head;
 	while (link->next != NULL) {
 		link = link->next;
@@ -63,15 +121,31 @@ void stc_put_current_scope(stc *head, const char *name, void *symbol) {
 	ht_set(link->table, name, symbol);
 }
 
-void *stc_search(stc *head, const char *name) {
-	stc *link = head;
+token *stc_search_res_word(stc *head, const char *name) {
+	return ht_get(head->table, name);
+}
+
+token *stc_search_global(stc *head, const char *name) {
+	return ht_get(head->next->table, name);
+}
+
+token *stc_search_local(stc *head, const char *name) {
+    stc *link = head;
 	while (link->next != NULL) {
 		link = link->next;
 	}
-	while (link != NULL) {
-		void *result = ht_get(link->table, name);
-		if (result) return result;
-		link = link->prev;
+    return ht_get(link->table, name);
+}
+
+token *stc_search_local_first(stc *head, const char *name) {
+    stc *link = head;
+	while (link->next != NULL) {
+		link = link->next;
 	}
-	return NULL;
+    while(link != NULL) {
+        void *local_result = ht_get(link->table, name);
+        if (local_result) return local_result;
+        link = link->prev;
+    }
+    return NULL;
 }
