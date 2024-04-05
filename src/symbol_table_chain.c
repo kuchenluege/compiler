@@ -28,26 +28,7 @@ void stc_destroy(stc *head) {
         hti iter = ht_iterator(tmp->table);
         while (ht_next(&iter)) {
             token *t = iter.value;
-            if (t != NULL) {
-                if (t->sym_type == ST_VAR) {
-                    switch (t->sym_val_type)
-                    {
-                    case SVT_INT:
-                        free(t->sym_val.int_ptr);
-                        break;
-                    case SVT_BOOL:
-                        free(t->sym_val.bool_ptr);
-                        break;
-                    case SVT_FLT:
-                        free(t->sym_val.float_ptr);
-                        break;
-                    case SVT_STR:
-                        free(t->sym_val.str_ptr);
-                        break;
-                    }
-                }
-                free(t);
-            }
+            free_symbol_token(t);
         }
 		ht_destroy(tmp->table);
 		link = tmp->next;
@@ -79,25 +60,7 @@ void stc_del_local(stc *head) {
     while (ht_next(&iter)) {
         token *t = iter.value;
         if (t != NULL) {
-            if (t->sym_type == ST_VAR) {
-                switch (t->sym_val_type)
-                {
-                case SVT_INT:
-                    free(t->sym_val.int_ptr);
-                    break;
-                case SVT_BOOL:
-                    free(t->sym_val.bool_ptr);
-                    break;
-                case SVT_FLT:
-                    free(t->sym_val.float_ptr);
-                    break;
-                case SVT_STR:
-                    free(t->sym_val.str_ptr);
-                    break;
-                }
-            }
-            printf("Freeing symbol: %s\n", t->display_name);
-            free(t);
+            free_symbol_token(t);
         }
     }
 	ht_destroy(link->table);
@@ -142,7 +105,7 @@ token *stc_search_local_first(stc *head, const char *name) {
 	while (link->next != NULL) {
 		link = link->next;
 	}
-    while(link != NULL) {
+    while(link->prev != NULL) {
         void *local_result = ht_get(link->table, name);
         if (local_result) return local_result;
         link = link->prev;

@@ -91,10 +91,12 @@ typedef enum symbol_type {
 } symbol_type;
 
 typedef enum symbol_value_type {
-	SVT_NONE = 0, SVT_INT, SVT_BOOL, SVT_FLT, SVT_STR
+	SVT_NONE = 0, SVT_INT, SVT_INT_ARR, SVT_BOOL, SVT_BOOL_ARR, SVT_FLT, SVT_FLT_ARR, SVT_STR, SVT_STR_ARR
 } symbol_value_type;
 
-typedef struct {
+typedef struct token token;
+
+struct token {
 	token_type type;
 	token_subtype subtype;
 	char display_name[MAX_TOKEN_LEN];
@@ -103,10 +105,9 @@ typedef struct {
 		float flt_val;
 		char str_val[MAX_TOKEN_LEN];
 	} lit_val;
-    int is_symbol;
+    
     symbol_type sym_type;
 	symbol_value_type sym_val_type;
-    int is_array;
     int sym_len;
     union {
         int *int_ptr;
@@ -114,6 +115,17 @@ typedef struct {
         float *float_ptr;
         char *str_ptr;
     } sym_val;
-} token;
+    int num_args;
+    symbol_value_type *proc_arg_types;
+};
+
+void free_symbol_token(token *tok);
+int is_symbol(token *tok);
+char *type_string(symbol_value_type type);
+symbol_value_type svt_from_literal_value_type(token_subtype lit_val_type);
+symbol_value_type svt_from_type_literal(token_subtype type_lit, int is_array);
+int is_array_type(symbol_value_type type);
+symbol_value_type type_of_arr_elem(symbol_value_type arr_type);
+int compatible_types(symbol_value_type type1, symbol_value_type type2);
 
 #endif
