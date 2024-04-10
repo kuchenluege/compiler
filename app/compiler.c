@@ -734,7 +734,7 @@ return_type if_statement(FILE *file) {
 	scan(file);
     return_type expr_res = expression(file);
 	ASSERT(expr_res.is_valid)
-    if (expr_res.type != SVT_BOOL) {
+    if (expr_res.type != SVT_BOOL && !compatible_types(expr_res.type, SVT_BOOL)) {
         print_error(file_data.name, NONBOOL_CONDITION, file_data.line_num);
         return INVALID;
     }
@@ -770,7 +770,7 @@ return_type for_statement(FILE *file) {
 	scan(file);
 	return_type expr_res = expression(file);
 	ASSERT(expr_res.is_valid)
-    if (expr_res.type != SVT_BOOL) {
+    if (expr_res.type != SVT_BOOL && !compatible_types(expr_res.type, SVT_BOOL)) {
         print_error(file_data.name, NONBOOL_CONDITION, file_data.line_num);
         return INVALID;
     }
