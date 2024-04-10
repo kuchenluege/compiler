@@ -1,7 +1,22 @@
 cmake_minimum_required(VERSION 3.8)
 
 project(compiler VERSION 0.1
-                 LANGUAGES C)
+                 LANGUAGES C CXX)
+
+set(CMAKE_C_STANDARD 99)
+set(C_STANDARD_REQUIRED YES)
+set(CMAKE_CXX_STANDARD 17)
+set(CXX_STANDARD_REQUIRED YES)
+message(STATUS "Using C compiler ${CMAKE_C_COMPILER_ID} ${CMAKE_C_COMPILER_VERSION}")
+message(STATUS "Using CXX compiler ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
+
+find_package(LLVM REQUIRED CONFIG)
+message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
+message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
+include_directories(${LLVM_INCLUDE_DIRS})
+separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
+add_definitions(${LLVM_DEFINITIONS_LIST})
+llvm_map_components_to_libnames(llvm_libs core executionengine mcjit interpreter analysis native bitwriter)
 
 add_library(hash_table STATIC src/hash_table.c)
 target_include_directories(hash_table PUBLIC include)
@@ -17,6 +32,9 @@ target_include_directories(symbol_table_chain PUBLIC include)
 target_link_libraries(symbol_table_chain PUBLIC hash_table
                                                 token)
 
-add_executable(compiler app/compiler.c)
-target_link_libraries(compiler PUBLIC symbol_table_chain
-									  error)
+add_executable(${PROJECT_NAME} app/compiler.c)
+set_target_properties(${PROJECT_NAME} PROPERTIES
+                            CXX_FLAGS ${CMAKE_CXX_FLAGS} "`llvm-config --cxxflags --ldflags --libs ${llvm_libs} --system-libs`")
+target_link_libraries(${PROJECT_NAME} symbol_table_chain
+									  error
+                                      ${llvm_libs})
