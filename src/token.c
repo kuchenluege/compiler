@@ -1,6 +1,27 @@
 #include <stdlib.h>
 #include "compiler/token.h"
 
+char *const RES_WORDS[] =
+	{"PROGRAM", "IS", "BEGIN", "END",
+	 "GLOBAL", "PROCEDURE", "VARIABLE", "IF",
+ 	 "THEN", "ELSE", "FOR", "RETURN", "TRUE",
+ 	 "FALSE", "NOT", "INTEGER", "FLOAT",
+ 	 "STRING", "BOOL"};
+
+const token_type RW_TOKEN_TYPES[] =
+	{T_PROGRAM, T_IS, T_BEGIN, T_END,
+	 T_GLOBAL, T_PROCEDURE, T_VARIABLE, T_IF,
+ 	 T_THEN, T_ELSE, T_FOR, T_RETURN, T_LITERAL,
+ 	 T_LITERAL, T_NOT, T_TYPE, T_TYPE,
+ 	 T_TYPE, T_TYPE};
+
+const token_subtype RW_TOKEN_SUBTYPES[] =
+	{T_ST_NONE, T_ST_NONE, T_ST_NONE, T_ST_NONE,
+	 T_ST_NONE, T_ST_NONE, T_ST_NONE, T_ST_NONE,
+ 	 T_ST_NONE, T_ST_NONE, T_ST_NONE, T_ST_NONE, T_ST_TRUE,
+ 	 T_ST_FALSE, T_ST_NONE, T_ST_INTEGER, T_ST_FLOAT,
+ 	 T_ST_STRING, T_ST_BOOL};
+
 void free_symbol_token(token *tok) {
     if (tok->sym_type == ST_VAR) {
         switch (tok->sym_val_type)

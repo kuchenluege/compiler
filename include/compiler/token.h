@@ -64,28 +64,6 @@ typedef enum token_subtype {
     T_ST_FALSE
 } token_subtype;
 
-
-static char *const RES_WORDS[] =
-	{"PROGRAM", "IS", "BEGIN", "END",
-	 "GLOBAL", "PROCEDURE", "VARIABLE", "IF",
- 	 "THEN", "ELSE", "FOR", "RETURN", "TRUE",
- 	 "FALSE", "NOT", "INTEGER", "FLOAT",
- 	 "STRING", "BOOL"};
-
-static const token_type RW_TOKEN_TYPES[] =
-	{T_PROGRAM, T_IS, T_BEGIN, T_END,
-	 T_GLOBAL, T_PROCEDURE, T_VARIABLE, T_IF,
- 	 T_THEN, T_ELSE, T_FOR, T_RETURN, T_LITERAL,
- 	 T_LITERAL, T_NOT, T_TYPE, T_TYPE,
- 	 T_TYPE, T_TYPE};
-
-static const token_subtype RW_TOKEN_SUBTYPES[] =
-	{T_ST_NONE, T_ST_NONE, T_ST_NONE, T_ST_NONE,
-	 T_ST_NONE, T_ST_NONE, T_ST_NONE, T_ST_NONE,
- 	 T_ST_NONE, T_ST_NONE, T_ST_NONE, T_ST_NONE, T_ST_TRUE,
- 	 T_ST_FALSE, T_ST_NONE, T_ST_INTEGER, T_ST_FLOAT,
- 	 T_ST_STRING, T_ST_BOOL};
-
 typedef enum symbol_type {
     ST_NONE = 0, ST_RW, ST_PROG, ST_VAR, ST_PROC
 } symbol_type;
@@ -94,8 +72,11 @@ typedef enum symbol_value_type {
 	SVT_NONE = 0, SVT_INT, SVT_INT_ARR, SVT_BOOL, SVT_BOOL_ARR, SVT_FLT, SVT_FLT_ARR, SVT_STR, SVT_STR_ARR
 } symbol_value_type;
 
-typedef struct token token;
+extern char *const RES_WORDS[19];
+extern const token_type RW_TOKEN_TYPES[19];
+extern const token_subtype RW_TOKEN_SUBTYPES[19];
 
+typedef struct token token;
 struct token {
 	token_type type;
 	token_subtype subtype;

@@ -24,17 +24,21 @@ target_include_directories(hash_table PUBLIC include)
 add_library(token STATIC src/token.c)
 target_include_directories(token PUBLIC include)
 
-add_library(error STATIC src/error.c)
-target_include_directories(error PUBLIC include)
-
 add_library(symbol_table_chain STATIC src/symbol_table_chain.c)
 target_include_directories(symbol_table_chain PUBLIC include)
 target_link_libraries(symbol_table_chain PUBLIC hash_table
                                                 token)
 
+add_library(error STATIC src/error.c)
+target_include_directories(error PUBLIC include)
+
+add_library(scanner STATIC src/scanner.c)
+target_include_directories(scanner PUBLIC include)
+target_link_libraries(scanner PUBLIC symbol_table_chain
+								     error)
+
 add_executable(${PROJECT_NAME} app/compiler.c)
 set_target_properties(${PROJECT_NAME} PROPERTIES
                             CXX_FLAGS ${CMAKE_CXX_FLAGS} "`llvm-config --cxxflags --ldflags --libs ${llvm_libs} --system-libs`")
-target_link_libraries(${PROJECT_NAME} symbol_table_chain
-									  error
+target_link_libraries(${PROJECT_NAME} scanner
                                       ${llvm_libs})
