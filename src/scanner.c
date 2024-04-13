@@ -66,14 +66,14 @@ void ignore_comments_whitespace(int *c_addr, FILE *file) {
 				} while (*c_addr != '*' && *c_addr != EOF);
 
 				if (*c_addr == EOF) {
-					print_error(file_name, UNCLOSED_COMMENT, comment_line_num);
+					log_error(file_name, UNCLOSED_COMMENT, comment_line_num);
 					break;
 				}
 
 				next_c = get_char(file);
 				if (next_c == EOF) {
 					*c_addr = next_c;
-					print_error(file_name, UNCLOSED_COMMENT, comment_line_num);
+					log_error(file_name, UNCLOSED_COMMENT, comment_line_num);
 					break;
 				}
 				if (next_c == '/') {
@@ -265,10 +265,10 @@ void scan(FILE *file) {
             tok->lit_val.str_val[i] = '\0';
 
             if (i == MAX_TOKEN_LEN - 1) {
-                print_error(file_name, TOKEN_TOO_LONG, str_line_num, tok->display_name);
+                log_error(file_name, TOKEN_TOO_LONG, str_line_num, tok->display_name);
             }
             if (c == EOF) {
-                print_error(file_name, UNCLOSED_STRING, str_line_num);
+                log_error(file_name, UNCLOSED_STRING, str_line_num);
             }
 
 		}
@@ -286,7 +286,7 @@ void scan(FILE *file) {
 			unget_char(c, file);
 
             if (i == MAX_TOKEN_LEN - 1) {
-                print_error(file_name, TOKEN_TOO_LONG, id_line_num, "identifier");
+                log_error(file_name, TOKEN_TOO_LONG, id_line_num, "identifier");
                 return;
             }
 			
@@ -317,13 +317,13 @@ void scan(FILE *file) {
 			unget_char(c, file);
 
             if (i == MAX_TOKEN_LEN - 1) {
-                print_error(file_name, TOKEN_TOO_LONG, num_line_num, tok->display_name);
+                log_error(file_name, TOKEN_TOO_LONG, num_line_num, tok->display_name);
                 scan(file);
                 return;
             }
 
 			if (dec_pt_cnt > 1) {
-				print_error(file_name, EXTRA_DECIMAL_POINT, num_line_num);
+				log_error(file_name, EXTRA_DECIMAL_POINT, num_line_num);
 				scan(file);
                 return;
 			}
@@ -344,7 +344,7 @@ void scan(FILE *file) {
 		strcpy(tok->display_name, "end of file");
 		break;
 	default:
-		print_error(file_name, UNRECOGNIZED_TOKEN, line_num, (char[2]){(char)c, '\0'});
+		log_error(file_name, UNRECOGNIZED_TOKEN, line_num, (char[2]){(char)c, '\0'});
         scan(file);
 		return;
 	}

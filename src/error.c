@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include "compiler/error.h"
 
-void print_error(char* file_name, error_type type, int line, ...) {
+void log_error(char* file_name, error_type type, int line, ...) {
 	va_list args;
     va_start(args, line);
 

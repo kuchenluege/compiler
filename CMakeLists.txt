@@ -37,8 +37,17 @@ target_include_directories(scanner PUBLIC include)
 target_link_libraries(scanner PUBLIC symbol_table_chain
 								     error)
 
+add_library(code_gen src/code_gen.c)
+target_include_directories(code_gen PUBLIC include)
+set_target_properties(code_gen PROPERTIES
+                     CXX_FLAGS ${CMAKE_CXX_FLAGS} "`llvm-config --cxxflags --ldflags --libs LLVMCore;LLVMAnalysis --system-libs`")
+target_link_libraries(code_gen PUBLIC token
+                                      LLVMCore
+                                      LLVMAnalysis)
+
 add_executable(${PROJECT_NAME} app/compiler.c)
 set_target_properties(${PROJECT_NAME} PROPERTIES
                             CXX_FLAGS ${CMAKE_CXX_FLAGS} "`llvm-config --cxxflags --ldflags --libs ${llvm_libs} --system-libs`")
-target_link_libraries(${PROJECT_NAME} scanner
-                                      ${llvm_libs})
+target_link_libraries(${PROJECT_NAME} PUBLIC scanner
+                                             code_gen
+                                             ${llvm_libs})

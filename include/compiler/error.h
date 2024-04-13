@@ -28,6 +28,6 @@ typedef enum {
     OUT_OF_MEMORY
 } error_type;
 
-void print_error(char* file_name, error_type type, int line, ...);
+void log_error(char* file_name, error_type type, int line, ...);
 
 #endif

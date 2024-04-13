@@ -2,46 +2,47 @@
 #include <stdint.h>
 #include <inttypes.h>
 
-#include <llvm-c/Core.h>
 #include <llvm-c/ExecutionEngine.h>
 #include <llvm-c/Target.h>
 #include <llvm-c/Analysis.h>
 #include <llvm-c/BitWriter.h>
 
 #include "compiler/scanner.h"
+#include "compiler/code_gen.h"
 
 #define ASSERT(X) if (!(X)) return (return_type){0, SVT_NONE};
 #define ASSERT_TOKEN(X, X_STR) if (tok->type != X) {\
 	if (tok->type == T_IDENT) {\
-        print_error(file_name, MISSING_TOKEN_FOUND_OTHER, line_num, X_STR, "identifier");\
+        log_error(file_name, MISSING_TOKEN_FOUND_OTHER, line_num, X_STR, "identifier");\
     }\
     else if (tok->type == T_LITERAL && tok->subtype != T_ST_TRUE && tok->subtype != T_ST_FALSE) {\
-        print_error(file_name, MISSING_TOKEN_FOUND_OTHER, line_num, X_STR, tok->display_name);\
+        log_error(file_name, MISSING_TOKEN_FOUND_OTHER, line_num, X_STR, tok->display_name);\
     }\
     else {\
-        print_error(file_name, MISSING_TOKEN_FOUND_TOKEN, line_num, X_STR, tok->display_name);\
+        log_error(file_name, MISSING_TOKEN_FOUND_TOKEN, line_num, X_STR, tok->display_name);\
     }\
 	return (return_type){0, SVT_NONE};\
 }
 #define ASSERT_OTHER(X, X_STR) if (!(X)) {\
 	if (tok->type == T_IDENT) {\
-        print_error(file_name, MISSING_OTHER_FOUND_OTHER, line_num, X_STR, "identifier");\
+        log_error(file_name, MISSING_OTHER_FOUND_OTHER, line_num, X_STR, "identifier");\
     }\
     else if (tok->type == T_LITERAL && tok->subtype != T_ST_TRUE && tok->subtype != T_ST_FALSE) {\
-        print_error(file_name, MISSING_OTHER_FOUND_OTHER, line_num, X_STR, tok->display_name);\
+        log_error(file_name, MISSING_OTHER_FOUND_OTHER, line_num, X_STR, tok->display_name);\
     }\
     else {\
-        print_error(file_name, MISSING_OTHER_FOUND_TOKEN, line_num, X_STR, tok->display_name);\
+        log_error(file_name, MISSING_OTHER_FOUND_TOKEN, line_num, X_STR, tok->display_name);\
     }\
 	return (return_type){0, SVT_NONE};\
 }
 
-#define VALID (return_type){1, SVT_NONE}
-#define INVALID (return_type){0, SVT_NONE}
+#define VALID (return_type){1, SVT_NONE, NULL}
+#define INVALID (return_type){0, SVT_NONE, NULL}
 
 typedef struct return_type {
     int is_valid;
     symbol_value_type type;
+    LLVMValueRef value;
 } return_type;
 
 return_type expression(FILE *file);
@@ -50,14 +51,14 @@ return_type argument_list_prime(FILE *file, token *proc, int i) {
     return_type expr_res = expression(file);
 	ASSERT(expr_res.is_valid)
     if (expr_res.type != proc->proc_arg_types[i]) {
-        print_error(file_name, INVALID_ARG_TYPE, line_num,
+        log_error(file_name, INVALID_ARG_TYPE, line_num,
                     proc->display_name, type_string(proc->proc_arg_types[i]), i + 1, expr_res.type);
         return INVALID;
     }
 	scan(file);
 	if (tok->type == T_COMMA) {
         if (i + 1 >= proc->num_args) {
-            print_error(file_name, UNEXPECTED_TOKEN_IN_PROC_CALL, line_num,
+            log_error(file_name, UNEXPECTED_TOKEN_IN_PROC_CALL, line_num,
                         tok->display_name, proc->display_name, proc->num_args);
         }
 		scan(file);
@@ -70,7 +71,7 @@ return_type argument_list_prime(FILE *file, token *proc, int i) {
 return_type argument_list(FILE *file, token *proc) {
 	if (tok->type != T_RPAREN) {
 		if (proc->num_args == 0) {
-            print_error(file_name, UNEXPECTED_TOKEN_IN_PROC_CALL, line_num,
+            log_error(file_name, UNEXPECTED_TOKEN_IN_PROC_CALL, line_num,
                         tok->display_name, proc->display_name, proc->num_args);
             return INVALID;
         }
@@ -78,7 +79,7 @@ return_type argument_list(FILE *file, token *proc) {
 	}
 	else {
         if (proc->num_args > 0) {
-            print_error(file_name, MISSING_ARG, line_num, type_string(proc->proc_arg_types[0]), proc->display_name);
+            log_error(file_name, MISSING_ARG, line_num, type_string(proc->proc_arg_types[0]), proc->display_name);
             return INVALID;
         }
         else unscan(tok);
@@ -90,7 +91,7 @@ return_type location_tail(FILE *file, token *arr) {
     return_type expr_res = expression(file);
 	ASSERT(expr_res.is_valid)
     if (expr_res.type != SVT_INT) {
-        print_error(file_name, ILLEGAL_ARRAY_INDEX, line_num);
+        log_error(file_name, ILLEGAL_ARRAY_INDEX, line_num);
         return INVALID;
     }
 	scan(file);
@@ -102,17 +103,17 @@ return_type location(FILE *file) {
 	ASSERT_OTHER(tok->type == T_IDENT, "identifier")
     token *variable = stc_search_local_first(symbol_tables, tok->display_name);
     if (!variable) {
-        print_error(file_name, UNDECLARED_SYMBOL, line_num, variable->display_name);
+        log_error(file_name, UNDECLARED_SYMBOL, line_num, variable->display_name);
         return INVALID;
     }
     else if (variable->sym_type != ST_VAR) {
-        print_error(file_name, NONVAR_ASSMT_DEST, line_num, variable->display_name);
+        log_error(file_name, NONVAR_ASSMT_DEST, line_num, variable->display_name);
         return INVALID;
     }
 	scan(file);
 	if (tok->type == T_LBRACK) {
         if (!is_array_type(variable->sym_val_type)) {
-            print_error(file_name, NOT_AN_ARRAY, line_num, variable->display_name);
+            log_error(file_name, NOT_AN_ARRAY, line_num, variable->display_name);
             return INVALID;
         }
 		scan(file);
@@ -135,7 +136,7 @@ return_type procedure_call_tail(FILE *file, token *proc) {
 return_type ident_tail(FILE *file, token *id) {
 	if (tok->type == T_LBRACK) {
 		if (!is_array_type(id->sym_val_type)) {
-            print_error(file_name, NOT_AN_ARRAY, line_num, id->display_name);
+            log_error(file_name, NOT_AN_ARRAY, line_num, id->display_name);
             return INVALID;
         }
         scan(file);
@@ -144,7 +145,7 @@ return_type ident_tail(FILE *file, token *id) {
 	}
 	else if (tok->type == T_LPAREN) {
         if (id->sym_type != ST_PROC) {
-            print_error(file_name, NOT_A_PROC, line_num, id->display_name);
+            log_error(file_name, NOT_A_PROC, line_num, id->display_name);
             return INVALID;
         }
 		scan(file);
@@ -158,6 +159,7 @@ return_type ident_tail(FILE *file, token *id) {
 }
 
 return_type factor(FILE *file) {
+    /*
 	if (tok->type == T_LPAREN) {
 		scan(file);
         return_type expr_res = expression(file);
@@ -196,40 +198,40 @@ return_type factor(FILE *file) {
 		scan(file);
 		return ident_tail(file, id);
 	}
-	else {
+	else {*/
         ASSERT_OTHER(tok->type == T_LITERAL, "expression")
-        return (return_type){1, svt_from_literal_value_type(tok->subtype)};
-    }
+        return (return_type){1, svt_from_literal_value_type(tok->subtype), code_gen_literal(tok)};
+    //}
 }
 
-return_type term_prime(FILE *file, symbol_value_type last_type) {
+return_type term_prime(FILE *file, symbol_value_type last_type, LLVMValueRef last_value) {
 	if (tok->type == T_TERM_OP) {
-        char op_str[256];
+        token_subtype op_st = tok->subtype;
+        char op_str[MAX_TOKEN_LEN];
         strcpy(op_str, tok->display_name);
         if (last_type != SVT_INT && last_type != SVT_FLT) {
-            print_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(last_type));
+            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(last_type));
             return INVALID;
         }
 		scan(file);
 		return_type factor_res = factor(file);
         ASSERT(factor_res.is_valid)
         if (factor_res.type != SVT_INT && factor_res.type != SVT_FLT) {
-            print_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(factor_res.type));
+            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(factor_res.type));
             return INVALID;
         }
-        symbol_value_type current_type;
-        if (last_type == SVT_FLT || factor_res.type == SVT_FLT) {
-            current_type = SVT_FLT;
-        }
-        else {
-            current_type = SVT_INT;
-        }
+        symbol_value_type current_type = (last_type == SVT_FLT || factor_res.type == SVT_FLT)? SVT_FLT
+                                                                                             : SVT_INT;
+        LLVMValueRef lhs_value = (current_type != last_type)? LLVMConstSIToFP(last_value, LLVMFloatType())
+                                                            : last_value;
+        LLVMValueRef rhs_value = (current_type != factor_res.type)? LLVMConstSIToFP(factor_res.value, LLVMFloatType())
+                                                                  : factor_res.value;
 		scan(file);
-        return term_prime(file, current_type);
+        return term_prime(file, current_type, code_gen_bin_op(op_st, lhs_value, rhs_value, current_type));
 	}
 	else {
         unscan(tok);
-        return (return_type){1, last_type};
+        return (return_type){1, last_type, last_value};
     }
 }
 
@@ -237,7 +239,7 @@ return_type term(FILE *file) {
     return_type factor_res = factor(file);
 	ASSERT(factor_res.is_valid)
 	scan(file);
-	return term_prime(file, factor_res.type);
+	return term_prime(file, factor_res.type, factor_res.value);
 }
 
 return_type relation_prime(FILE *file, symbol_value_type last_type) {
@@ -247,7 +249,7 @@ return_type relation_prime(FILE *file, symbol_value_type last_type) {
         strcpy(op_str, tok->display_name);
         if ((last_type == SVT_STR && op_st != T_ST_EQLTO && op_st != T_ST_NOTEQ) || is_array_type(last_type))
         {
-            print_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(last_type));
+            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(last_type));
             return INVALID;
         }
 		scan(file);
@@ -255,11 +257,11 @@ return_type relation_prime(FILE *file, symbol_value_type last_type) {
 		ASSERT(term_res.is_valid)
         if ((term_res.type == SVT_STR && op_st != T_ST_EQLTO && op_st != T_ST_NOTEQ) || is_array_type(term_res.type))
         {
-            print_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(term_res.type));
+            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(term_res.type));
             return INVALID;
         }
         if (last_type != term_res.type && !compatible_types(last_type, term_res.type)) {
-            print_error(file_name, INVALID_OPERAND_TYPES, line_num,
+            log_error(file_name, INVALID_OPERAND_TYPES, line_num,
                         op_str, type_string(last_type), type_string(term_res.type));
             return INVALID;
         }
@@ -279,37 +281,42 @@ return_type relation(FILE *file) {
 	return relation_prime(file, term_res.type);
 }
 
-return_type arith_op_prime(FILE *file, symbol_value_type last_type) {
+return_type arith_op_prime(FILE *file, symbol_value_type last_type, LLVMValueRef last_value) {
 	if (tok->type == T_ARITH_OP) {
+        token_subtype op_st = tok->subtype;
         char op_str[256];
         strcpy(op_str, tok->display_name);
         if (last_type != SVT_INT && last_type != SVT_FLT) {
-            print_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(last_type));
+            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(last_type));
             return INVALID;
         }
 		scan(file);
-        return_type rel_res = relation(file);
+        return_type rel_res = term(file);
 		ASSERT(rel_res.is_valid)
         if (rel_res.type != SVT_INT && rel_res.type != SVT_FLT) {
-            print_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(rel_res.type));
+            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(rel_res.type));
             return INVALID;
         }
-        symbol_value_type current_type = (last_type == SVT_FLT || rel_res.type == SVT_FLT)?
-                                         SVT_FLT : SVT_FLT;
+        symbol_value_type current_type = (last_type == SVT_FLT || rel_res.type == SVT_FLT)? SVT_FLT
+                                                                                          : SVT_INT;
+        LLVMValueRef lhs_value = (current_type != last_type)? LLVMConstSIToFP(last_value, LLVMFloatType())
+                                                            : last_value;
+        LLVMValueRef rhs_value = (current_type != rel_res.type)? LLVMConstSIToFP(rel_res.value, LLVMFloatType())
+                                                               : rel_res.value;
 		scan(file);
-		return arith_op_prime(file, current_type);
+		return arith_op_prime(file, current_type, code_gen_bin_op(op_st, lhs_value, rhs_value, current_type));
 	}
 	else {
         unscan(tok);
-        return (return_type){1, last_type};
+        return (return_type){1, last_type, last_value};
     }
 }
 
 return_type arith_op(FILE *file) {
-	return_type rel_res = relation(file);
+	return_type rel_res = term(file);
     ASSERT(rel_res.is_valid)
 	scan(file);
-	return arith_op_prime(file, rel_res.type);
+	return arith_op_prime(file, rel_res.type, rel_res.value);
 }
 
 return_type expression_prime(FILE *file, symbol_value_type last_type) {
@@ -317,14 +324,14 @@ return_type expression_prime(FILE *file, symbol_value_type last_type) {
         char op_str[256];
         strcpy(op_str, tok->display_name);
         if (last_type != SVT_INT && last_type != SVT_BOOL) {
-            print_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(last_type));
+            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(last_type));
             return INVALID;
         }
 		scan(file);
 		return_type arop_res = arith_op(file);
         ASSERT(arop_res.is_valid)
         if (arop_res.type != SVT_INT && arop_res.type != SVT_BOOL) {
-            print_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(arop_res.type));
+            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(arop_res.type));
             return INVALID;
         }
         symbol_value_type current_type = (last_type == SVT_INT || arop_res.type == SVT_INT)?
@@ -346,7 +353,7 @@ return_type expression(FILE *file) {
         return_type arop_res = arith_op(file);
         ASSERT(arop_res.is_valid)
         if (arop_res.type != SVT_INT && arop_res.type != SVT_BOOL) {
-            print_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(arop_res.type));
+            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(arop_res.type));
             return INVALID;
         }
         scan(file);
@@ -369,7 +376,7 @@ return_type assignment_statement(FILE *file) {
     return_type expr_res = expression(file);
 	ASSERT(expr_res.is_valid);
     if (loc_res.type != expr_res.type && !compatible_types(loc_res.type, expr_res.type)) {
-        print_error(file_name, INCOMPATIBLE_TYPE_ASSMT, line_num,
+        log_error(file_name, INCOMPATIBLE_TYPE_ASSMT, line_num,
                     type_string(expr_res.type), type_string(loc_res.type));
         return INVALID;
     }
@@ -388,7 +395,7 @@ return_type if_statement(FILE *file) {
     return_type expr_res = expression(file);
 	ASSERT(expr_res.is_valid)
     if (expr_res.type != SVT_BOOL && !compatible_types(expr_res.type, SVT_BOOL)) {
-        print_error(file_name, NONBOOL_CONDITION, line_num);
+        log_error(file_name, NONBOOL_CONDITION, line_num);
         return INVALID;
     }
 	scan(file);
@@ -424,7 +431,7 @@ return_type for_statement(FILE *file) {
 	return_type expr_res = expression(file);
 	ASSERT(expr_res.is_valid)
     if (expr_res.type != SVT_BOOL && !compatible_types(expr_res.type, SVT_BOOL)) {
-        print_error(file_name, NONBOOL_CONDITION, line_num);
+        log_error(file_name, NONBOOL_CONDITION, line_num);
         return INVALID;
     }
 	scan(file);
@@ -478,7 +485,7 @@ return_type variable_declaration(FILE *file, token *owning_procedure, int is_par
     if (stc_search_local(symbol_tables, variable->display_name) ||
         is_global && stc_search_global(symbol_tables, variable->display_name))
     {
-        print_error(file_name, DUPLICATE_DECLARATION, line_num, variable->display_name);
+        log_error(file_name, DUPLICATE_DECLARATION, line_num, variable->display_name);
         free(variable);
         return INVALID;
     }
@@ -494,7 +501,7 @@ return_type variable_declaration(FILE *file, token *owning_procedure, int is_par
         is_array = 1;
 		scan(file);
 		if (tok->subtype != T_ST_INT_LIT || tok->lit_val.int_val < 1) {
-            print_error(file_name, ILLEGAL_ARRAY_LEN, line_num);
+            log_error(file_name, ILLEGAL_ARRAY_LEN, line_num);
             free(variable);
             return INVALID;
         }
@@ -532,7 +539,7 @@ return_type variable_declaration(FILE *file, token *owning_procedure, int is_par
         if (!owning_procedure->num_args) {
             owning_procedure->proc_arg_types = malloc(sizeof(symbol_value_type));
             if (!owning_procedure->proc_arg_types) {
-                print_error(file_name, OUT_OF_MEMORY, line_num);
+                log_error(file_name, OUT_OF_MEMORY, line_num);
                 return INVALID;
             }
             owning_procedure->proc_arg_types[0] = variable->sym_val_type;
@@ -541,7 +548,7 @@ return_type variable_declaration(FILE *file, token *owning_procedure, int is_par
             symbol_value_type *tmp = realloc(owning_procedure->proc_arg_types,
                                              sizeof(owning_procedure->proc_arg_types) + sizeof(symbol_value_type));
             if (tmp == NULL) {
-                print_error(file_name, OUT_OF_MEMORY, line_num);
+                log_error(file_name, OUT_OF_MEMORY, line_num);
                 return INVALID;
             }
             owning_procedure->proc_arg_types = tmp;
@@ -587,14 +594,14 @@ return_type procedure_declaration(FILE *file, token *owning_procedure) {
     ASSERT_OTHER(tok->type == T_IDENT, "identifier")
     token *procedure = malloc(sizeof(token));
     if (procedure == NULL) {
-        print_error(file_name, OUT_OF_MEMORY, line_num);
+        log_error(file_name, OUT_OF_MEMORY, line_num);
         return INVALID;
     }
     memcpy(procedure, tok, sizeof(token));
     if (stc_search_local(symbol_tables, procedure->display_name) ||
         is_global && stc_search_global(symbol_tables, procedure->display_name))
     {
-        print_error(file_name, DUPLICATE_DECLARATION, line_num, procedure->display_name);
+        log_error(file_name, DUPLICATE_DECLARATION, line_num, procedure->display_name);
         free(procedure);
         return INVALID;
     }
@@ -610,7 +617,7 @@ return_type procedure_declaration(FILE *file, token *owning_procedure) {
         is_array = 1;
 		scan(file);
 		if (tok->subtype != T_ST_INT_LIT || tok->lit_val.int_val < 1) {
-            print_error(file_name, ILLEGAL_ARRAY_LEN, line_num);
+            log_error(file_name, ILLEGAL_ARRAY_LEN, line_num);
             free(procedure);
             return INVALID;
         }
@@ -682,13 +689,30 @@ return_type program(FILE *file) {
 	ASSERT_OTHER(tok->type == T_IDENT, "identifier")
     tok->sym_type = ST_PROG;
     stc_put_local(symbol_tables, tok->display_name, tok);
+    char module_name[MAX_TOKEN_LEN];
+    strcpy(module_name, tok->display_name);
 	scan(file);
 	ASSERT_TOKEN(T_IS, "IS")
 	scan(file);
-	ASSERT(program_body(file).is_valid)
+	//ASSERT(program_body(file).is_valid)
+    return_type arop_ret = arith_op(file);
+    ASSERT(arop_ret.is_valid)
+    scan(file);
+	ASSERT_TOKEN(T_END, "END")
+    scan(file);
+	ASSERT_TOKEN(T_PROGRAM, "PROGRAM")
 	scan(file);
 	ASSERT_TOKEN(T_PERIOD, ".")
-	return VALID;
+
+    LLVMModuleRef module = code_gen_module(module_name, arop_ret.value);
+    if (module) {
+        char *ir = LLVMPrintModuleToString(module);
+        printf("%s\n", ir);
+        LLVMDisposeMessage(ir);
+        LLVMDisposeModule(module);
+        return VALID;
+    }
+    return INVALID;
 }
 
 return_type parse(FILE *file) {
@@ -703,10 +727,16 @@ int compile(FILE *file) {
     symbol_tables = stc_create();
 	init_res_words();
 
+    builder = LLVMCreateBuilder();
+
 	int output = parse(file).is_valid;
     if (!is_symbol(tok)) free(tok);
 
 	printf("Parse: %d\n", output);
+
+    LLVMDisposeBuilder(builder);
+    LLVMShutdown();
+    stc_destroy(symbol_tables);
 
 	return 0;
 }
@@ -733,7 +763,7 @@ int main(int argc, char *argv[]) {
     LLVMInitializeNativeAsmPrinter();
     LLVMInitializeNativeAsmParser();
 
-    LLVMModuleRef mod = LLVMModuleCreateWithName("my_module");
+    LLVMModuleRef mod = code_gen_module("my_module");
 
     LLVMTypeRef param_types[] = { LLVMInt32Type(), LLVMInt32Type() };
     LLVMTypeRef ret_type = LLVMFunctionType(LLVMInt32Type(), param_types, 2, 0);
