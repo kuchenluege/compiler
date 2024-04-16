@@ -79,6 +79,12 @@ void log_error(char* file_name, error_type type, int line, ...) {
     case NONBOOL_CONDITION:
         fprintf(stderr, "conditional expression must have type BOOL");
         break;
+    case ILLEGAL_RETURN:
+        fprintf(stderr, "return statement has no owning procedure");
+        break;
+    case INCOMPATIBLE_RETURN_TYPE:
+        fprintf(stderr, "return value type %s is not compatible with procedure type %s", args);
+        break;
     case OUT_OF_MEMORY:
         fprintf(stderr, "ran out of memory during compilation");
         break;

@@ -26,7 +26,6 @@ typedef enum token_type {
 	T_ELSE,
 	T_FOR,
 	T_RETURN,
-	T_NOT,
 	T_EXPR_OP,
 	T_ARITH_OP,
 	T_REL_OP,
@@ -43,6 +42,7 @@ typedef enum token_subtype {
 	T_ST_NONE = 0,
 	T_ST_AND = '&',
 	T_ST_OR = '|',
+    T_ST_NOT,
 	T_ST_PLUS = '+',
 	T_ST_MINUS = '-',
 	T_ST_MULT = '*',
@@ -102,11 +102,12 @@ struct token {
 
 void free_symbol_token(token *tok);
 int is_symbol(token *tok);
-char *type_string(symbol_value_type type);
+char *type_to_str(symbol_value_type type);
 symbol_value_type svt_from_literal_value_type(token_subtype lit_val_type);
 symbol_value_type svt_from_type_literal(token_subtype type_lit, int is_array);
 int is_array_type(symbol_value_type type);
 symbol_value_type type_of_arr_elem(symbol_value_type arr_type);
-int compatible_types(symbol_value_type type1, symbol_value_type type2);
+int compatible_types(symbol_value_type l_type, symbol_value_type r_type);
+int convertible_types(symbol_value_type source_type, symbol_value_type dest_type);
 
 #endif
