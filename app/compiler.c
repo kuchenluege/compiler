@@ -10,7 +10,10 @@
 #include "compiler/scanner.h"
 #include "compiler/code_gen.h"
 
-#define ASSERT(X) if (!(X)) return (return_type){0, SVT_NONE};
+#define VALID (return_type){1, SVT_NONE, NULL}
+#define INVALID (return_type){0, SVT_NONE, NULL}
+
+#define ASSERT(X) if (!(X)) return INVALID;
 #define ASSERT_TOKEN(X, X_STR) if (tok->type != X) {\
 	if (tok->type == T_IDENT) {\
         log_error(file_name, MISSING_TOKEN_FOUND_OTHER, line_num, X_STR, "identifier");\
@@ -21,7 +24,7 @@
     else {\
         log_error(file_name, MISSING_TOKEN_FOUND_TOKEN, line_num, X_STR, tok->display_name);\
     }\
-	return (return_type){0, SVT_NONE};\
+	return INVALID;\
 }
 #define ASSERT_OTHER(X, X_STR) if (!(X)) {\
 	if (tok->type == T_IDENT) {\
@@ -33,11 +36,8 @@
     else {\
         log_error(file_name, MISSING_OTHER_FOUND_TOKEN, line_num, X_STR, tok->display_name);\
     }\
-	return (return_type){0, SVT_NONE};\
+	return INVALID;\
 }
-
-#define VALID (return_type){1, SVT_NONE, NULL}
-#define INVALID (return_type){0, SVT_NONE, NULL}
 
 typedef struct return_type {
     int is_valid;
@@ -52,7 +52,7 @@ return_type argument_list_prime(FILE *file, token *proc, int i) {
 	ASSERT(expr_res.is_valid)
     if (expr_res.type != proc->proc_arg_types[i]) {
         log_error(file_name, INVALID_ARG_TYPE, line_num,
-                    proc->display_name, type_string(proc->proc_arg_types[i]), i + 1, expr_res.type);
+                    proc->display_name, type_to_str(proc->proc_arg_types[i]), i + 1, expr_res.type);
         return INVALID;
     }
 	scan(file);
@@ -79,7 +79,7 @@ return_type argument_list(FILE *file, token *proc) {
 	}
 	else {
         if (proc->num_args > 0) {
-            log_error(file_name, MISSING_ARG, line_num, type_string(proc->proc_arg_types[0]), proc->display_name);
+            log_error(file_name, MISSING_ARG, line_num, type_to_str(proc->proc_arg_types[0]), proc->display_name);
             return INVALID;
         }
         else unscan(tok);
@@ -159,17 +159,17 @@ return_type ident_tail(FILE *file, token *id) {
 }
 
 return_type factor(FILE *file) {
-    /*
 	if (tok->type == T_LPAREN) {
 		scan(file);
         return_type expr_res = expression(file);
-		ASSERT_OTHER(expr_res.is_valid, "expression")
+		ASSERT(expr_res.is_valid)
 		scan(file);
 		ASSERT_TOKEN(T_RPAREN, ")")
         return expr_res;
 	}
 	else if (tok->subtype == T_ST_MINUS) {
 		scan(file);
+        /*
 		if (tok->type == T_IDENT) {
             token *id = stc_search_local_first(symbol_tables, tok->display_name);
             if (!id) {
@@ -179,16 +179,17 @@ return_type factor(FILE *file) {
 			scan(file);
             return ident_tail(file, id);
 		}
-		else {
+		else {*/
             ASSERT_OTHER(tok->subtype == T_ST_INT_LIT || tok->subtype == T_ST_FLOAT_LIT, "identifier or numeric literal")
-            if (tok->subtype == T_ST_INT_LIT) {
-                return (return_type){1, SVT_INT};
-            }
             if (tok->subtype == T_ST_FLOAT_LIT) {
-                return (return_type){1, SVT_FLT};
+                return (return_type){1, SVT_FLT, code_gen_literal(tok, -1)};
             }
-        }
+            else {
+                return (return_type){1, SVT_INT, code_gen_literal(tok, -1)};
+            }
+        //}
 	}
+    /*
 	else if (tok->type == T_IDENT) {
         token *id = stc_search_local_first(symbol_tables, tok->display_name);
         if (!id) {
@@ -198,10 +199,11 @@ return_type factor(FILE *file) {
 		scan(file);
 		return ident_tail(file, id);
 	}
-	else {*/
+    */
+	else {
         ASSERT_OTHER(tok->type == T_LITERAL, "expression")
-        return (return_type){1, svt_from_literal_value_type(tok->subtype), code_gen_literal(tok)};
-    //}
+        return (return_type){1, svt_from_literal_value_type(tok->subtype), code_gen_literal(tok, 1)};
+    }
 }
 
 return_type term_prime(FILE *file, symbol_value_type last_type, LLVMValueRef last_value) {
@@ -210,22 +212,20 @@ return_type term_prime(FILE *file, symbol_value_type last_type, LLVMValueRef las
         char op_str[MAX_TOKEN_LEN];
         strcpy(op_str, tok->display_name);
         if (last_type != SVT_INT && last_type != SVT_FLT) {
-            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(last_type));
+            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_to_str(last_type));
             return INVALID;
         }
 		scan(file);
 		return_type factor_res = factor(file);
         ASSERT(factor_res.is_valid)
         if (factor_res.type != SVT_INT && factor_res.type != SVT_FLT) {
-            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(factor_res.type));
+            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_to_str(factor_res.type));
             return INVALID;
         }
         symbol_value_type current_type = (last_type == SVT_FLT || factor_res.type == SVT_FLT)? SVT_FLT
                                                                                              : SVT_INT;
-        LLVMValueRef lhs_value = (current_type != last_type)? LLVMConstSIToFP(last_value, LLVMFloatType())
-                                                            : last_value;
-        LLVMValueRef rhs_value = (current_type != factor_res.type)? LLVMConstSIToFP(factor_res.value, LLVMFloatType())
-                                                                  : factor_res.value;
+        LLVMValueRef lhs_value = code_gen_convert_type(last_value, current_type);
+        LLVMValueRef rhs_value = code_gen_convert_type(factor_res.value, current_type);
 		scan(file);
         return term_prime(file, current_type, code_gen_bin_op(op_st, lhs_value, rhs_value, current_type));
 	}
@@ -242,14 +242,14 @@ return_type term(FILE *file) {
 	return term_prime(file, factor_res.type, factor_res.value);
 }
 
-return_type relation_prime(FILE *file, symbol_value_type last_type) {
+return_type relation_prime(FILE *file, symbol_value_type last_type, LLVMValueRef last_value) {
 	if (tok->type == T_REL_OP) {
         token_subtype op_st = tok->subtype;
         char op_str[256];
         strcpy(op_str, tok->display_name);
         if ((last_type == SVT_STR && op_st != T_ST_EQLTO && op_st != T_ST_NOTEQ) || is_array_type(last_type))
         {
-            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(last_type));
+            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_to_str(last_type));
             return INVALID;
         }
 		scan(file);
@@ -257,20 +257,29 @@ return_type relation_prime(FILE *file, symbol_value_type last_type) {
 		ASSERT(term_res.is_valid)
         if ((term_res.type == SVT_STR && op_st != T_ST_EQLTO && op_st != T_ST_NOTEQ) || is_array_type(term_res.type))
         {
-            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(term_res.type));
+            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_to_str(term_res.type));
             return INVALID;
         }
-        if (last_type != term_res.type && !compatible_types(last_type, term_res.type)) {
+        if (!compatible_types(last_type, term_res.type)) {
             log_error(file_name, INVALID_OPERAND_TYPES, line_num,
-                        op_str, type_string(last_type), type_string(term_res.type));
+                        op_str, type_to_str(last_type), type_to_str(term_res.type));
             return INVALID;
         }
+        symbol_value_type rel_comp_type;
+        rel_comp_type = (last_type == SVT_INT || term_res.type == SVT_INT)? SVT_INT
+                                                                     : SVT_BOOL;
+        rel_comp_type = (last_type == SVT_FLT || term_res.type == SVT_FLT)? SVT_FLT
+                                                                     : rel_comp_type;
+        rel_comp_type = (last_type == SVT_STR)? SVT_STR
+                                         : rel_comp_type;
+        LLVMValueRef lhs_value = code_gen_convert_type(last_value, rel_comp_type);
+        LLVMValueRef rhs_value = code_gen_convert_type(term_res.value, rel_comp_type);
 		scan(file);
-        return relation_prime(file, SVT_BOOL);
+        return relation_prime(file, SVT_BOOL, code_gen_bin_op(op_st, lhs_value, rhs_value, rel_comp_type));
 	}
 	else {
         unscan(tok);
-        return (return_type){1, last_type};
+        return (return_type){1, last_type, last_value};
     }
 }
 
@@ -278,7 +287,7 @@ return_type relation(FILE *file) {
 	return_type term_res = term(file);
     ASSERT(term_res.is_valid)
 	scan(file);
-	return relation_prime(file, term_res.type);
+	return relation_prime(file, term_res.type, term_res.value);
 }
 
 return_type arith_op_prime(FILE *file, symbol_value_type last_type, LLVMValueRef last_value) {
@@ -287,22 +296,20 @@ return_type arith_op_prime(FILE *file, symbol_value_type last_type, LLVMValueRef
         char op_str[256];
         strcpy(op_str, tok->display_name);
         if (last_type != SVT_INT && last_type != SVT_FLT) {
-            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(last_type));
+            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_to_str(last_type));
             return INVALID;
         }
 		scan(file);
-        return_type rel_res = term(file);
+        return_type rel_res = relation(file);
 		ASSERT(rel_res.is_valid)
         if (rel_res.type != SVT_INT && rel_res.type != SVT_FLT) {
-            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(rel_res.type));
+            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_to_str(rel_res.type));
             return INVALID;
         }
         symbol_value_type current_type = (last_type == SVT_FLT || rel_res.type == SVT_FLT)? SVT_FLT
                                                                                           : SVT_INT;
-        LLVMValueRef lhs_value = (current_type != last_type)? LLVMConstSIToFP(last_value, LLVMFloatType())
-                                                            : last_value;
-        LLVMValueRef rhs_value = (current_type != rel_res.type)? LLVMConstSIToFP(rel_res.value, LLVMFloatType())
-                                                               : rel_res.value;
+        LLVMValueRef lhs_value = code_gen_convert_type(last_value, current_type);
+        LLVMValueRef rhs_value = code_gen_convert_type(rel_res.value, current_type);
 		scan(file);
 		return arith_op_prime(file, current_type, code_gen_bin_op(op_st, lhs_value, rhs_value, current_type));
 	}
@@ -313,61 +320,65 @@ return_type arith_op_prime(FILE *file, symbol_value_type last_type, LLVMValueRef
 }
 
 return_type arith_op(FILE *file) {
-	return_type rel_res = term(file);
+	return_type rel_res = relation(file);
     ASSERT(rel_res.is_valid)
 	scan(file);
 	return arith_op_prime(file, rel_res.type, rel_res.value);
 }
 
-return_type expression_prime(FILE *file, symbol_value_type last_type) {
-	if (tok->type == T_EXPR_OP) {
+return_type expression_prime(FILE *file, symbol_value_type last_type, LLVMValueRef last_value) {
+	if (tok->type == T_EXPR_OP && tok->subtype != T_ST_NOT) {
+        token_subtype op_st = tok->subtype;
         char op_str[256];
         strcpy(op_str, tok->display_name);
         if (last_type != SVT_INT && last_type != SVT_BOOL) {
-            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(last_type));
+            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_to_str(last_type));
             return INVALID;
         }
 		scan(file);
 		return_type arop_res = arith_op(file);
         ASSERT(arop_res.is_valid)
         if (arop_res.type != SVT_INT && arop_res.type != SVT_BOOL) {
-            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(arop_res.type));
+            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_to_str(arop_res.type));
             return INVALID;
         }
-        symbol_value_type current_type = (last_type == SVT_INT || arop_res.type == SVT_INT)?
-                                         SVT_INT : SVT_BOOL;
+        if (last_type != arop_res.type) {
+            log_error(file_name, INVALID_OPERAND_TYPES, line_num, op_str, type_to_str(last_type), type_to_str(arop_res.type));
+            return INVALID;
+        }
 		scan(file);
-		return expression_prime(file, current_type);
+		return expression_prime(file, last_type, code_gen_bin_op(op_st, last_value, arop_res.value, arop_res.type));
 	}
 	else {
         unscan(tok);
-        return (return_type){1, last_type};
+        return (return_type){1, last_type, last_value};
     }
 }
 
 return_type expression(FILE *file) {
-	if (tok->type == T_NOT) {
+	if (tok->subtype == T_ST_NOT) {
+        token_subtype op_st = tok->subtype;
         char op_str[256];
         strcpy(op_str, tok->display_name);
 		scan(file);
         return_type arop_res = arith_op(file);
         ASSERT(arop_res.is_valid)
         if (arop_res.type != SVT_INT && arop_res.type != SVT_BOOL) {
-            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_string(arop_res.type));
+            log_error(file_name, INVALID_OPERAND_TYPE, line_num, op_str, type_to_str(arop_res.type));
             return INVALID;
         }
         scan(file);
-        return expression_prime(file, arop_res.type);
+        return expression_prime(file, arop_res.type, code_gen_un_op(op_st, arop_res.value, arop_res.type));
 	}
     else {
         return_type arop_res = arith_op(file);
         ASSERT(arop_res.is_valid)
         scan(file);
-        return expression_prime(file, arop_res.type);
+        return expression_prime(file, arop_res.type, arop_res.value);
     }
 }
 
-return_type assignment_statement(FILE *file) {
+return_type assignment_statement(FILE *file, token *owning_procedure) {
 	return_type loc_res = location(file);
     ASSERT(loc_res.is_valid)
 	scan(file);
@@ -375,9 +386,9 @@ return_type assignment_statement(FILE *file) {
 	scan(file);
     return_type expr_res = expression(file);
 	ASSERT(expr_res.is_valid);
-    if (loc_res.type != expr_res.type && !compatible_types(loc_res.type, expr_res.type)) {
+    if (!compatible_types(loc_res.type, expr_res.type)) {
         log_error(file_name, INCOMPATIBLE_TYPE_ASSMT, line_num,
-                    type_string(expr_res.type), type_string(loc_res.type));
+                    type_to_str(expr_res.type), type_to_str(loc_res.type));
         return INVALID;
     }
 	scan(file);
@@ -385,16 +396,16 @@ return_type assignment_statement(FILE *file) {
 	return VALID;
 }
 
-return_type statement(FILE *file);
+return_type statement(FILE *file, token *owning_procedure);
 
-return_type if_statement(FILE *file) {
+return_type if_statement(FILE *file, token *owning_procedure) {
 	ASSERT_TOKEN(T_IF, "IF")
 	scan(file);
 	ASSERT_TOKEN(T_LPAREN, "(")
 	scan(file);
     return_type expr_res = expression(file);
 	ASSERT(expr_res.is_valid)
-    if (expr_res.type != SVT_BOOL && !compatible_types(expr_res.type, SVT_BOOL)) {
+    if (!compatible_types(expr_res.type, SVT_BOOL)) {
         log_error(file_name, NONBOOL_CONDITION, line_num);
         return INVALID;
     }
@@ -404,13 +415,13 @@ return_type if_statement(FILE *file) {
 	ASSERT_TOKEN(T_THEN, "THEN")
 	scan(file);
 	while (tok->type != T_END && tok->type != T_ELSE) {
-		ASSERT(statement(file).is_valid)
+		ASSERT(statement(file, owning_procedure).is_valid)
 		scan(file);
 	}
 	if (tok->type == T_ELSE) {
 		scan(file);
 		while (tok->type != T_END) {
-			ASSERT(statement(file).is_valid)
+			ASSERT(statement(file, owning_procedure).is_valid)
 			scan(file);
 		}
 	}
@@ -421,16 +432,16 @@ return_type if_statement(FILE *file) {
 	return VALID;
 }
 
-return_type for_statement(FILE *file) {
+return_type for_statement(FILE *file, token *owning_procedure) {
 	ASSERT_TOKEN(T_FOR, "FOR")
 	scan(file);
 	ASSERT_TOKEN(T_LPAREN, "(")
 	scan(file);
-	ASSERT(assignment_statement(file).is_valid)
+	ASSERT(assignment_statement(file, owning_procedure).is_valid)
 	scan(file);
 	return_type expr_res = expression(file);
 	ASSERT(expr_res.is_valid)
-    if (expr_res.type != SVT_BOOL && !compatible_types(expr_res.type, SVT_BOOL)) {
+    if (!compatible_types(expr_res.type, SVT_BOOL)) {
         log_error(file_name, NONBOOL_CONDITION, line_num);
         return INVALID;
     }
@@ -438,7 +449,7 @@ return_type for_statement(FILE *file) {
 	ASSERT_TOKEN(T_RPAREN, ")")
 	scan(file);
 	while (tok->type != T_END) {
-		ASSERT(statement(file).is_valid)
+		ASSERT(statement(file, owning_procedure).is_valid)
 		scan(file);
 	}
 	scan(file);
@@ -448,28 +459,45 @@ return_type for_statement(FILE *file) {
 	return VALID;
 }
 
-return_type return_statement(FILE *file) {
-	ASSERT_TOKEN(T_RETURN, "RETURN")
+return_type return_statement(FILE *file, token *owning_procedure) {
+    ASSERT_TOKEN(T_RETURN, "RETURN")
+    if (!owning_procedure) {
+        log_error(file_name, ILLEGAL_RETURN, line_num);
+        return INVALID;
+    }
 	scan(file);
-	ASSERT(expression(file).is_valid)
+    return_type expr_res = expression(file);
+	ASSERT(expr_res.is_valid)
+    
+    symbol_value_type ret_type = owning_procedure->sym_val_type;
+
+    if (!convertible_types(expr_res.type, ret_type)) {
+        log_error(file_name, INCOMPATIBLE_RETURN_TYPE, line_num,
+                  type_to_str(expr_res.type), type_to_str(owning_procedure->sym_val_type));
+        return INVALID;
+    }
+    LLVMValueRef ret_value = expr_res.value;
+    if (expr_res.type != ret_type) {
+        ret_value = code_gen_convert_type(ret_value, ret_type);
+    }
 	scan(file);
 	ASSERT_TOKEN(T_SEMICOLON, ";")
-	return VALID;
+	return (return_type){1, ret_type, ret_value};
 }
 
-return_type statement(FILE *file) {
+return_type statement(FILE *file, token *owning_procedure) {
 	switch (tok->type) {
 	case T_IDENT:
-		ASSERT(assignment_statement(file).is_valid)
+		ASSERT(assignment_statement(file, owning_procedure).is_valid)
 		break;
 	case T_IF:
-		ASSERT(if_statement(file).is_valid)
+		ASSERT(if_statement(file, owning_procedure).is_valid)
 		break;
 	case T_FOR:
-		ASSERT(for_statement(file).is_valid)
+		ASSERT(for_statement(file, owning_procedure).is_valid)
 		break;
 	case T_RETURN:
-		ASSERT(return_statement(file).is_valid)
+		ASSERT(return_statement(file, owning_procedure).is_valid)
 		break;
 	default:
 		ASSERT_OTHER(0, "statement")
@@ -579,14 +607,20 @@ return_type procedure_body(FILE *file, token *owning_procedure) {
 		scan(file);
 	}
 	scan(file);
+    /*
 	while (tok->type != T_END) {
 		ASSERT(statement(file).is_valid)
 		scan(file);
 	}
+    */
+    return_type return_res = return_statement(file, owning_procedure);
+    ASSERT(return_res.is_valid)
+	scan(file);                 // remove when uncommenting above
+	ASSERT_TOKEN(T_END, "END")  //
 	scan(file);
 	ASSERT_TOKEN(T_PROCEDURE, "PROCEDURE")
 	stc_del_local(symbol_tables);
-	return VALID;
+	return return_res;
 }
 
 return_type procedure_declaration(FILE *file, token *owning_procedure) {
@@ -641,9 +675,14 @@ return_type procedure_declaration(FILE *file, token *owning_procedure) {
 	else unscan(tok);
 	scan(file);
 	ASSERT_TOKEN(T_RPAREN, ")")
+    LLVMValueRef func_proto = code_gen_func_proto(procedure);
+    ASSERT(func_proto)
 	scan(file);
-	ASSERT(procedure_body(file, procedure).is_valid)
-	return VALID;
+    return_type proc_body_res = procedure_body(file, procedure);
+	ASSERT(proc_body_res.is_valid)
+    LLVMValueRef func = code_gen_func(func_proto, proc_body_res.value);
+    ASSERT(func)
+	return (return_type){1, SVT_NONE, func};
 }
 
 return_type declaration(FILE *file, token *owning_procedure) {
@@ -670,12 +709,16 @@ return_type declaration(FILE *file, token *owning_procedure) {
 
 return_type program_body(FILE *file) {
 	while (tok->type != T_BEGIN) {
-		ASSERT(declaration(file, NULL).is_valid)
+        ASSERT_TOKEN(T_PROCEDURE, "PROCEDURE") //
+        scan(file);                            //
+		ASSERT(procedure_declaration(file, NULL).is_valid) // declaration
+        scan(file);                            //
+        ASSERT_TOKEN(T_SEMICOLON, ";")         //
 		scan(file);
 	}
 	scan(file);
 	while (tok->type != T_END) {
-		ASSERT(statement(file).is_valid)
+		ASSERT(statement(file, NULL).is_valid)
 		scan(file);
 	}
 	scan(file);
@@ -687,32 +730,21 @@ return_type program(FILE *file) {
 	ASSERT_TOKEN(T_PROGRAM, "PROGRAM")
 	scan(file);
 	ASSERT_OTHER(tok->type == T_IDENT, "identifier")
+
     tok->sym_type = ST_PROG;
     stc_put_local(symbol_tables, tok->display_name, tok);
+
     char module_name[MAX_TOKEN_LEN];
     strcpy(module_name, tok->display_name);
+    code_gen_module(module_name);
+
 	scan(file);
 	ASSERT_TOKEN(T_IS, "IS")
 	scan(file);
-	//ASSERT(program_body(file).is_valid)
-    return_type arop_ret = arith_op(file);
-    ASSERT(arop_ret.is_valid)
-    scan(file);
-	ASSERT_TOKEN(T_END, "END")
-    scan(file);
-	ASSERT_TOKEN(T_PROGRAM, "PROGRAM")
-	scan(file);
+    ASSERT(program_body(file).is_valid)
+	scan(file);                         
 	ASSERT_TOKEN(T_PERIOD, ".")
-
-    LLVMModuleRef module = code_gen_module(module_name, arop_ret.value);
-    if (module) {
-        char *ir = LLVMPrintModuleToString(module);
-        printf("%s\n", ir);
-        LLVMDisposeMessage(ir);
-        LLVMDisposeModule(module);
-        return VALID;
-    }
-    return INVALID;
+    return VALID;
 }
 
 return_type parse(FILE *file) {
@@ -726,16 +758,15 @@ return_type parse(FILE *file) {
 int compile(FILE *file) {
     symbol_tables = stc_create();
 	init_res_words();
-
-    builder = LLVMCreateBuilder();
+    code_gen_init();
 
 	int output = parse(file).is_valid;
     if (!is_symbol(tok)) free(tok);
 
 	printf("Parse: %d\n", output);
+    log_ir();
 
-    LLVMDisposeBuilder(builder);
-    LLVMShutdown();
+    code_gen_shutdown();
     stc_destroy(symbol_tables);
 
 	return 0;

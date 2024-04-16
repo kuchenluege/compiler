@@ -12,14 +12,14 @@ const token_type RW_TOKEN_TYPES[] =
 	{T_PROGRAM, T_IS, T_BEGIN, T_END,
 	 T_GLOBAL, T_PROCEDURE, T_VARIABLE, T_IF,
  	 T_THEN, T_ELSE, T_FOR, T_RETURN, T_LITERAL,
- 	 T_LITERAL, T_NOT, T_TYPE, T_TYPE,
+ 	 T_LITERAL, T_EXPR_OP, T_TYPE, T_TYPE,
  	 T_TYPE, T_TYPE};
 
 const token_subtype RW_TOKEN_SUBTYPES[] =
 	{T_ST_NONE, T_ST_NONE, T_ST_NONE, T_ST_NONE,
 	 T_ST_NONE, T_ST_NONE, T_ST_NONE, T_ST_NONE,
  	 T_ST_NONE, T_ST_NONE, T_ST_NONE, T_ST_NONE, T_ST_TRUE,
- 	 T_ST_FALSE, T_ST_NONE, T_ST_INTEGER, T_ST_FLOAT,
+ 	 T_ST_FALSE, T_ST_NOT, T_ST_INTEGER, T_ST_FLOAT,
  	 T_ST_STRING, T_ST_BOOL};
 
 void free_symbol_token(token *tok) {
@@ -54,7 +54,7 @@ int is_symbol(token *tok) {
     return tok->sym_type != ST_NONE;
 }
 
-char *type_string(symbol_value_type type) {
+char *type_to_str(symbol_value_type type) {
     switch (type) {
     case SVT_INT:
         return "INTEGER";
@@ -132,9 +132,17 @@ symbol_value_type type_of_arr_elem(symbol_value_type arr_type) {
     }
 }
 
-int compatible_types(symbol_value_type type1, symbol_value_type type2) {
-    return type1 == SVT_BOOL && type2 == SVT_INT ||
-           type1 == SVT_INT && type2 == SVT_BOOL ||
-           type1 == SVT_INT && type2 == SVT_FLT ||
-           type1 == SVT_FLT && type2 == SVT_INT;
+int compatible_types(symbol_value_type l_type, symbol_value_type r_type) {
+    return l_type == r_type ||
+           l_type == SVT_BOOL && r_type == SVT_INT ||
+           l_type == SVT_INT && r_type == SVT_BOOL ||
+           l_type == SVT_INT && r_type == SVT_FLT ||
+           l_type == SVT_FLT && r_type == SVT_INT;
+}
+
+int convertible_types(symbol_value_type source_type, symbol_value_type dest_type) {
+    return source_type == dest_type ||
+           source_type == SVT_BOOL && dest_type == SVT_INT ||
+           source_type == SVT_INT && dest_type == SVT_BOOL ||
+           source_type == SVT_INT && dest_type == SVT_FLT;
 }
