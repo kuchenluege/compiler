@@ -130,8 +130,9 @@ void scan(FILE *file) {
     tok->sym_type = ST_NONE;
 	tok->sym_val_type = SVT_NONE;
     tok->sym_len = 0;
-    tok->num_args = 0;
-    tok->proc_arg_types = NULL;
+    tok->proc_param_count = 0;
+    tok->proc_params = NULL;
+    tok->alloca_ptr = NULL;
 
 	switch (c) {
 	case T_PERIOD:

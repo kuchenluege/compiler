@@ -50,16 +50,16 @@ return_type expression(FILE *file);
 return_type argument_list_prime(FILE *file, token *proc, int i) {
     return_type expr_res = expression(file);
 	ASSERT(expr_res.is_valid)
-    if (expr_res.type != proc->proc_arg_types[i]) {
+    if (expr_res.type != proc->proc_params[i]->sym_val_type) {
         log_error(file_name, INVALID_ARG_TYPE, line_num,
-                    proc->display_name, type_to_str(proc->proc_arg_types[i]), i + 1, expr_res.type);
+                    proc->display_name, type_to_str(proc->proc_params[i]->sym_val_type), i + 1, expr_res.type);
         return INVALID;
     }
 	scan(file);
 	if (tok->type == T_COMMA) {
-        if (i + 1 >= proc->num_args) {
+        if (i + 1 >= proc->proc_param_count) {
             log_error(file_name, UNEXPECTED_TOKEN_IN_PROC_CALL, line_num,
-                        tok->display_name, proc->display_name, proc->num_args);
+                        tok->display_name, proc->display_name, proc->proc_param_count);
         }
 		scan(file);
 		ASSERT(argument_list_prime(file, proc, i + 1).is_valid)
@@ -70,16 +70,16 @@ return_type argument_list_prime(FILE *file, token *proc, int i) {
 
 return_type argument_list(FILE *file, token *proc) {
 	if (tok->type != T_RPAREN) {
-		if (proc->num_args == 0) {
+		if (proc->proc_param_count == 0) {
             log_error(file_name, UNEXPECTED_TOKEN_IN_PROC_CALL, line_num,
-                        tok->display_name, proc->display_name, proc->num_args);
+                        tok->display_name, proc->display_name, proc->proc_param_count);
             return INVALID;
         }
         ASSERT(argument_list_prime(file, proc, 0).is_valid)
 	}
 	else {
-        if (proc->num_args > 0) {
-            log_error(file_name, MISSING_ARG, line_num, type_to_str(proc->proc_arg_types[0]), proc->display_name);
+        if (proc->proc_param_count > 0) {
+            log_error(file_name, MISSING_ARG, line_num, type_to_str(proc->proc_params[0]->sym_val_type), proc->display_name);
             return INVALID;
         }
         else unscan(tok);
@@ -111,6 +111,7 @@ return_type location(FILE *file) {
         return INVALID;
     }
 	scan(file);
+    // fix arrays first
 	if (tok->type == T_LBRACK) {
         if (!is_array_type(variable->sym_val_type)) {
             log_error(file_name, NOT_AN_ARRAY, line_num, variable->display_name);
@@ -122,7 +123,7 @@ return_type location(FILE *file) {
 	}
 	else {
         unscan(tok);
-        return (return_type){1, variable->sym_val_type};
+        return (return_type){1, variable->sym_val_type, variable->alloca_ptr};
     }
 }
 
@@ -134,6 +135,7 @@ return_type procedure_call_tail(FILE *file, token *proc) {
 }
 
 return_type ident_tail(FILE *file, token *id) {
+    // todo arrays and function calls
 	if (tok->type == T_LBRACK) {
 		if (!is_array_type(id->sym_val_type)) {
             log_error(file_name, NOT_AN_ARRAY, line_num, id->display_name);
@@ -154,7 +156,7 @@ return_type ident_tail(FILE *file, token *id) {
 	} 
 	else {
         unscan(tok);
-        return (return_type){1, id->sym_val_type};
+        return (return_type){1, id->sym_val_type, code_gen_load(id)};
     }
 }
 
@@ -169,17 +171,16 @@ return_type factor(FILE *file) {
 	}
 	else if (tok->subtype == T_ST_MINUS) {
 		scan(file);
-        /*
 		if (tok->type == T_IDENT) {
             token *id = stc_search_local_first(symbol_tables, tok->display_name);
             if (!id) {
-                print_error(file_name, UNDECLARED_SYMBOL,  line_num);
+                log_error(file_name, UNDECLARED_SYMBOL,  line_num);
                 return INVALID;
             }
 			scan(file);
             return ident_tail(file, id);
 		}
-		else {*/
+		else {
             ASSERT_OTHER(tok->subtype == T_ST_INT_LIT || tok->subtype == T_ST_FLOAT_LIT, "identifier or numeric literal")
             if (tok->subtype == T_ST_FLOAT_LIT) {
                 return (return_type){1, SVT_FLT, code_gen_literal(tok, -1)};
@@ -187,19 +188,17 @@ return_type factor(FILE *file) {
             else {
                 return (return_type){1, SVT_INT, code_gen_literal(tok, -1)};
             }
-        //}
+        }
 	}
-    /*
 	else if (tok->type == T_IDENT) {
         token *id = stc_search_local_first(symbol_tables, tok->display_name);
         if (!id) {
-            print_error(file_name, UNDECLARED_SYMBOL, line_num, tok->display_name);
+            log_error(file_name, UNDECLARED_SYMBOL, line_num, tok->display_name);
             return INVALID;
         }
 		scan(file);
 		return ident_tail(file, id);
 	}
-    */
 	else {
         ASSERT_OTHER(tok->type == T_LITERAL, "expression")
         return (return_type){1, svt_from_literal_value_type(tok->subtype), code_gen_literal(tok, 1)};
@@ -393,7 +392,7 @@ return_type assignment_statement(FILE *file, token *owning_procedure) {
     }
 	scan(file);
 	ASSERT_TOKEN(T_SEMICOLON, ";")
-	return VALID;
+	return (return_type){1, SVT_NONE, code_gen_store(expr_res.value, loc_res.value)};
 }
 
 return_type statement(FILE *file, token *owning_procedure);
@@ -403,35 +402,42 @@ return_type if_statement(FILE *file, token *owning_procedure) {
 	scan(file);
 	ASSERT_TOKEN(T_LPAREN, "(")
 	scan(file);
-    return_type expr_res = expression(file);
-	ASSERT(expr_res.is_valid)
-    if (!compatible_types(expr_res.type, SVT_BOOL)) {
-        log_error(file_name, NONBOOL_CONDITION, line_num);
+    return_type if_res = expression(file);
+	ASSERT(if_res.is_valid)
+    if (!convertible_types(if_res.type, SVT_BOOL)) {
+        log_error(file_name, INVALID_CONDITION, line_num);
         return INVALID;
     }
+    if_stmt_data data = code_gen_if_stmt_if(if_res.value);
 	scan(file);
 	ASSERT_TOKEN(T_RPAREN, ")")
 	scan(file);
 	ASSERT_TOKEN(T_THEN, "THEN")
 	scan(file);
+    return_type then_res = INVALID;
 	while (tok->type != T_END && tok->type != T_ELSE) {
-		ASSERT(statement(file, owning_procedure).is_valid)
+        then_res = statement(file, owning_procedure);
+		ASSERT(then_res.is_valid)
 		scan(file);
 	}
+    code_gen_if_stmt_then(&data);
+    return_type else_res = INVALID;
 	if (tok->type == T_ELSE) {
 		scan(file);
 		while (tok->type != T_END) {
-			ASSERT(statement(file, owning_procedure).is_valid)
+            else_res = statement(file, owning_procedure);
+			ASSERT(else_res.is_valid)
 			scan(file);
 		}
 	}
+    ASSERT_TOKEN(T_END, "END")
 	scan(file);
 	ASSERT_TOKEN(T_IF, "IF")
 	scan(file);
 	ASSERT_TOKEN(T_SEMICOLON, ";")
-	return VALID;
+    return (return_type){1, SVT_NONE, code_gen_if_stmt_merge(then_res.value, else_res.value, &data)};
 }
-
+/*
 return_type for_statement(FILE *file, token *owning_procedure) {
 	ASSERT_TOKEN(T_FOR, "FOR")
 	scan(file);
@@ -442,7 +448,7 @@ return_type for_statement(FILE *file, token *owning_procedure) {
 	return_type expr_res = expression(file);
 	ASSERT(expr_res.is_valid)
     if (!compatible_types(expr_res.type, SVT_BOOL)) {
-        log_error(file_name, NONBOOL_CONDITION, line_num);
+        log_error(file_name, INVALID_CONDITION, line_num);
         return INVALID;
     }
 	scan(file);
@@ -458,7 +464,7 @@ return_type for_statement(FILE *file, token *owning_procedure) {
 	ASSERT_TOKEN(T_SEMICOLON, ";")
 	return VALID;
 }
-
+*/
 return_type return_statement(FILE *file, token *owning_procedure) {
     ASSERT_TOKEN(T_RETURN, "RETURN")
     if (!owning_procedure) {
@@ -482,27 +488,31 @@ return_type return_statement(FILE *file, token *owning_procedure) {
     }
 	scan(file);
 	ASSERT_TOKEN(T_SEMICOLON, ";")
-	return (return_type){1, ret_type, ret_value};
+    return (return_type){1, SVT_NONE, code_gen_ret_stmt(ret_value)};
 }
 
 return_type statement(FILE *file, token *owning_procedure) {
+    return_type stmt_res = INVALID;
 	switch (tok->type) {
 	case T_IDENT:
-		ASSERT(assignment_statement(file, owning_procedure).is_valid)
-		break;
+        stmt_res = assignment_statement(file, owning_procedure);
+		ASSERT(stmt_res.is_valid)
+        break;
 	case T_IF:
-		ASSERT(if_statement(file, owning_procedure).is_valid)
+        stmt_res = if_statement(file, owning_procedure);
+		ASSERT(stmt_res.is_valid)
 		break;
-	case T_FOR:
-		ASSERT(for_statement(file, owning_procedure).is_valid)
-		break;
+	//case T_FOR:
+	//	ASSERT(for_statement(file, owning_procedure).is_valid)
+	//	break;
 	case T_RETURN:
-		ASSERT(return_statement(file, owning_procedure).is_valid)
+        stmt_res = return_statement(file, owning_procedure);
+		ASSERT(stmt_res.is_valid)
 		break;
 	default:
 		ASSERT_OTHER(0, "statement")
 	}
-	return VALID;
+	return stmt_res;
 }
 
 return_type variable_declaration(FILE *file, token *owning_procedure, int is_parameter) {
@@ -541,47 +551,31 @@ return_type variable_declaration(FILE *file, token *owning_procedure, int is_par
     variable->sym_type = ST_VAR;
     variable->sym_val_type = svt_from_type_literal(type_lit, is_array);
     variable->sym_len = len;
-    switch (variable->sym_val_type)
-    {
-    case SVT_INT:
-    case SVT_INT_ARR:
-        variable->sym_val.int_ptr = malloc(len * sizeof(int));
-        break;
-    case SVT_BOOL:
-    case SVT_BOOL_ARR:
-        variable->sym_val.bool_ptr = malloc(len * sizeof(int));
-        break;
-    case SVT_FLT:
-    case SVT_FLT_ARR:
-        variable->sym_val.float_ptr = malloc(len * sizeof(float));
-        break;
-    case SVT_STR:
-    case SVT_STR_ARR:
-        variable->sym_val.str_ptr = malloc(len * MAX_TOKEN_LEN * sizeof(char));
-        break;
-    }
-    stc_put_local(symbol_tables, variable->display_name, variable);
-    if (owning_procedure && is_parameter) {
-        owning_procedure->num_args++;
+    if (is_parameter) {
+        owning_procedure->proc_param_count++;
 
-        if (!owning_procedure->num_args) {
-            owning_procedure->proc_arg_types = malloc(sizeof(symbol_value_type));
-            if (!owning_procedure->proc_arg_types) {
+        if (!owning_procedure->proc_param_count) {
+            owning_procedure->proc_params = malloc(sizeof(token*));
+            if (!owning_procedure->proc_params) {
                 log_error(file_name, OUT_OF_MEMORY, line_num);
                 return INVALID;
             }
-            owning_procedure->proc_arg_types[0] = variable->sym_val_type;
+            owning_procedure->proc_params[0] = variable;
         }
         else {
-            symbol_value_type *tmp = realloc(owning_procedure->proc_arg_types,
-                                             sizeof(owning_procedure->proc_arg_types) + sizeof(symbol_value_type));
+            token **tmp = realloc(owning_procedure->proc_params,
+                                             sizeof(owning_procedure->proc_params) + sizeof(token*));
             if (tmp == NULL) {
                 log_error(file_name, OUT_OF_MEMORY, line_num);
                 return INVALID;
             }
-            owning_procedure->proc_arg_types = tmp;
-            owning_procedure->proc_arg_types[owning_procedure->num_args - 1] = variable->sym_val_type;
+            owning_procedure->proc_params = tmp;
+            owning_procedure->proc_params[owning_procedure->proc_param_count - 1] = variable;
         }
+    }
+    else {
+        stc_put_local(symbol_tables, variable->display_name, variable);
+        variable->alloca_ptr = code_gen_alloca(variable);
     }
 	return VALID;
 }
@@ -607,20 +601,14 @@ return_type procedure_body(FILE *file, token *owning_procedure) {
 		scan(file);
 	}
 	scan(file);
-    /*
 	while (tok->type != T_END) {
-		ASSERT(statement(file).is_valid)
+		ASSERT(statement(file, owning_procedure).is_valid)
 		scan(file);
 	}
-    */
-    return_type return_res = return_statement(file, owning_procedure);
-    ASSERT(return_res.is_valid)
-	scan(file);                 // remove when uncommenting above
-	ASSERT_TOKEN(T_END, "END")  //
 	scan(file);
 	ASSERT_TOKEN(T_PROCEDURE, "PROCEDURE")
 	stc_del_local(symbol_tables);
-	return return_res;
+	return VALID;
 }
 
 return_type procedure_declaration(FILE *file, token *owning_procedure) {
@@ -663,8 +651,6 @@ return_type procedure_declaration(FILE *file, token *owning_procedure) {
     procedure->sym_type = ST_PROC;
     procedure->sym_val_type = svt_from_type_literal(type_lit, is_array);
     procedure->sym_len = len;
-    stc_put_local(symbol_tables, procedure->display_name, procedure);
-    stc_add_local(symbol_tables);
 	scan(file);
 	ASSERT_TOKEN(T_LPAREN, "(")
 	scan(file);
@@ -675,14 +661,20 @@ return_type procedure_declaration(FILE *file, token *owning_procedure) {
 	else unscan(tok);
 	scan(file);
 	ASSERT_TOKEN(T_RPAREN, ")")
-    LLVMValueRef func_proto = code_gen_func_proto(procedure);
-    ASSERT(func_proto)
+    stc_put_local(symbol_tables, procedure->display_name, procedure);
+    stc_add_local(symbol_tables);
+    LLVMValueRef func = code_gen_func(procedure);
+    ASSERT(func)
+    for (unsigned i = 0; i < procedure->proc_param_count; i++) {
+        token *param = procedure->proc_params[i];
+        stc_put_local(symbol_tables, param->display_name, param);
+    }
 	scan(file);
     return_type proc_body_res = procedure_body(file, procedure);
 	ASSERT(proc_body_res.is_valid)
-    LLVMValueRef func = code_gen_func(func_proto, proc_body_res.value);
+    func = code_gen_verify_func(func);
     ASSERT(func)
-	return (return_type){1, SVT_NONE, func};
+	return VALID;
 }
 
 return_type declaration(FILE *file, token *owning_procedure) {

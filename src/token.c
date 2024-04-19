@@ -23,29 +23,8 @@ const token_subtype RW_TOKEN_SUBTYPES[] =
  	 T_ST_STRING, T_ST_BOOL};
 
 void free_symbol_token(token *tok) {
-    if (tok->sym_type == ST_VAR) {
-        switch (tok->sym_val_type)
-        {
-        case SVT_INT:
-        case SVT_INT_ARR:
-            free(tok->sym_val.int_ptr);
-            break;
-        case SVT_BOOL:
-        case SVT_BOOL_ARR:
-            free(tok->sym_val.bool_ptr);
-            break;
-        case SVT_FLT:
-        case SVT_FLT_ARR:
-            free(tok->sym_val.float_ptr);
-            break;
-        case SVT_STR:
-        case SVT_STR_ARR:
-            free(tok->sym_val.str_ptr);
-            break;
-        }
-    }
     if (tok->sym_type == ST_PROC) {
-        free(tok->proc_arg_types);
+        free(tok->proc_params);
     }
     free(tok);
 }

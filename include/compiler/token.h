@@ -1,6 +1,8 @@
 #ifndef TOKEN_H
 #define TOKEN_H
 
+#include <llvm-c/Core.h>
+
 #define MAX_TOKEN_LEN 256
 
 // Token Types
@@ -90,14 +92,9 @@ struct token {
     symbol_type sym_type;
 	symbol_value_type sym_val_type;
     int sym_len;
-    union {
-        int *int_ptr;
-        int *bool_ptr;
-        float *float_ptr;
-        char *str_ptr;
-    } sym_val;
-    int num_args;
-    symbol_value_type *proc_arg_types;
+    int proc_param_count;
+    token **proc_params;
+    LLVMValueRef alloca_ptr;
 };
 
 void free_symbol_token(token *tok);

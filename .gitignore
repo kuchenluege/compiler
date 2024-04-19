@@ -3,4 +3,3 @@ build/*
 debug/*
 ctest.c
 a.out
-basic_test.src

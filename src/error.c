@@ -76,8 +76,8 @@ void log_error(char* file_name, error_type type, int line, ...) {
     case INVALID_OPERAND_TYPES:
         vfprintf(stderr, "operator '%s' does not support operands of type %s and %s", args);
         break;
-    case NONBOOL_CONDITION:
-        fprintf(stderr, "conditional expression must have type BOOL");
+    case INVALID_CONDITION:
+        fprintf(stderr, "conditional expression must have type BOOL or INTEGER");
         break;
     case ILLEGAL_RETURN:
         fprintf(stderr, "return statement has no owning procedure");
